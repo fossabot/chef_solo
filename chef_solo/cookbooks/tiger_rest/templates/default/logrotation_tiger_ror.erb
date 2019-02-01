@@ -1,0 +1,20 @@
+/var/log/tiger_rest.log{
+  rotate 10
+  weekly
+  su root
+  missingok
+  notifempty
+  copytruncate
+  compress
+  delaycompress
+}
+
+/opt/tiger/RoR/tiger/log/development.log{
+  rotate 10
+  weekly
+  missingok
+  notifempty
+  copytruncate
+  compress
+  delaycompress
+}

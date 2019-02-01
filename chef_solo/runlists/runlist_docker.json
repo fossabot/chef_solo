@@ -1,0 +1,7 @@
+{ "run_list": [
+    "recipe[tiger_common::users_setup]",
+    "recipe[tiger_docker]"
+   ],
+  "secret": "",
+  "user_secret":""
+} 

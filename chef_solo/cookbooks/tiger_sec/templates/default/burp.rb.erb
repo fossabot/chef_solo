@@ -1,0 +1,200 @@
+class Burp
+  require 'nokogiri'
+  require 'fileutils'
+  require 'socket'
+  require 'timeout'
+
+  def initialize
+    $burp_issues_count = 0
+    $burp_warnings_count = 0
+    @tests_cmd=''
+    $burp_summary=''
+    @exclusions_file_path = "<%= node['tiger_sec']['burp_exclusions_file_path'] %>"
+    @project_file_name    = "<%= node['tiger_sec']['burp_project_file'] %>"
+    @project_files_path   = "<%=node['tiger_sec']['burp_project_files_path'] %>"
+    @target_host      = '<%= node['tiger_sec']['target_host'] %>'
+    @target_protocol  = '<%= node['tiger_sec']['protocol'] %>'
+    @target_port      = '<%= node['tiger_sec']['target_port'] %>'
+    @node_log_path    = "<%= node['tiger_sec']['node_logs_path'] %>"
+    @web_results_path = '<%= node['tiger_sec']['web_results_path'] %>'
+    @scripts_path     = "<%= node['tiger_sec']['scripts_path'] %>"
+
+    @burp_rest_api_jar = "<%= node['tiger_sec']['burp_rest_api_jar_path'] %>"
+    @burpa_path = "<%= node['tiger_sec']['burpa_path'] %>"
+  end
+
+  def run_tests
+    $logger.info 'Starting BURP...'
+    burp_rest_api_cmd = "java -Xmx1024M -jar #{@burp_rest_api_jar} --user-config-file=/opt/tiger/software/burp-default-user-options.json"
+
+    # Check project-file exesting
+    if @project_file_name != ''
+      unless File.file?(@project_files_path + '/' + @project_file_name)
+        $logger.warn "Project file '#{project_file}' wasn't found in the repository"
+        puts "Project file '#{@project_files_path}/#{project_file}' wasn't found in the repository"
+        return
+      end
+      project_file_path = @project_files_path + '/' + @project_file_name
+      burp_rest_api_cmd += " --project-file=" + project_file_path
+      $logger.info " | -- Proceed with project-file: #{@project_file_name}"
+    else
+      $logger.info ' | -- Proceed without project file'
+    end
+
+    $logger.info ' | -- Starting burp-rest-api...'
+    system("nohup #{burp_rest_api_cmd} &")
+    # Waiting until burp port will be opened
+    until is_port_open?('127.0.0.1',8080)
+      p 'Waiting for burp-rest-api starting'
+      sleep 10
+    end
+
+    sleep 240 # waiting untill all plugins won't be connected
+
+    $logger.info ' | -- Filling of Burp-rest-api cache...'
+    main_url = @target_host.split('/')[0]
+    rel_path = @target_host.sub(main_url,'')
+    p "#{@target_protocol}://#{main_url}:#{@target_port}#{rel_path}"
+    system ("curl -L -k -x 127.0.0.1:8080 #{@target_protocol}://#{main_url}:#{@target_port}#{rel_path}")
+
+    $logger.info ' | -- Burpa setting up..'
+    system("python #{@burpa_path}/burpa.py http://127.0.0.1 --action proxy-config >> #{@node_log_path}/burpa.log 2>&1")
+    sleep 5 # Time for Burpa setting up
+
+    if ["80", "443"].include? "#{@target_port}"
+       system("python #{@burpa_path}/burpa.py http://127.0.0.1 --action scan --include-scope #{@target_protocol}://#{main_url}:#{@target_port} --report in-scope>> #{@node_log_path}/burpa.log 2>&1")
+    else
+       system("python #{@burpa_path}/burpa.py http://127.0.0.1 --action scan --include-scope #{@target_protocol}://#{main_url} #{@target_protocol}://#{main_url}:#{@target_port} --report in-scope>> #{@node_log_path}/burpa.log 2>&1")
+    end
+
+    Dir.glob("/tmp/burp*.html").each do |file|
+       $logger.info " |- Copying #{file} reports..."
+       FileUtils.cp file,@node_log_path + "/burp_report.html"
+     end
+    output_vulnerability
+    $logger.info 'Burp finished'
+  end
+
+  def parse_HTML(path)
+    issues = Array.new # Issues - is an array of hashes [{:id,:problem,:severity,:path}]
+    html = Nokogiri::HTML( File.open(path) )
+
+    # Get list of all issues
+    html.css('.TOCH0').each do |content|
+      issue_desc = Hash.new
+      str = content.css('a').text.gsub("\u00A0", '').split('.')
+      if html.xpath("//a[starts-with(@href,'##{str[0]}.')]").text != ""
+        html.xpath("//p/a[starts-with(@href,'##{str[0]}.')]").each do |subissue|
+          issue_desc[:id] = subissue.text.gsub("\u00A0", ' ').split[0].chomp('.')
+          issue_desc[:problem] = str[1]
+          issue_desc[:url] = "##{issue_desc[:id]}"
+          issues << issue_desc
+          issue_desc = Hash.new
+        end
+      else
+        issue_desc[:id] = str[0]
+        issue_desc[:problem] = str[1]
+        issue_desc[:url] = "##{issue_desc[:id]}"
+        issues << issue_desc
+      end
+    end
+
+    # Get list of all severities
+    severity_list = Array.new
+    html.css('.summary_table').each do |severity|
+      severity_list << severity.at_css('td b').text
+    end
+
+    # Get list of all pathes
+    path_list = Array.new
+    html.css('.summary_table').each do |path|
+      path_list << path.css('td b').last.text
+    end
+
+    # Combine issues with severity and path
+    issues.each_with_index do |value,index|
+      issues[index][:severity] = severity_list[index]
+      issues[index][:path] = path_list[index]
+    end
+
+    issues.delete_if {|el| el[:severity] == 'Information' }
+
+    return issues
+  end
+
+  def parse_excl_YAML(path)
+    yaml_hash = YAML.load_file(path)
+    return yaml_hash
+  end
+
+  def is_port_open?(ip, port)
+    begin
+      Timeout::timeout(1) do
+        begin
+          s = TCPSocket.new(ip, port)
+          s.close
+          return true
+        rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
+          return false
+        end
+      end
+    rescue Timeout::Error
+    end
+    return false
+  end
+
+  def output_vulnerability
+    issue_list = parse_HTML(@node_log_path + "/burp_report.html")
+
+    # Check exlusions list.Delete an issue if it identical with exclusion and doesn't have 'visible' flag
+    if ( File.exist?(@exclusions_file_path) )
+      exclusion = parse_excl_YAML(@exclusions_file_path)
+      issue_list.each do |issue|
+        if exclusion['warning'].has_key?(issue[:problem])
+          if exclusion['warning'][issue[:problem]]['path'] != issue[:path]
+            issue[:severity] = 'Warning'
+          elsif exclusion['warning'][issue[:problem]].has_key?('visible')
+            issue[:severity] = 'Warning'
+          else
+            $logger.info " #{issue[:problem]} is an exclusion"
+            issue[:severity] = 'Information'
+          end
+        end
+      end
+    end
+
+    # Delete issues with severity "Information"
+    issue_list.delete_if {|el| el[:severity] == 'Information' }
+
+    # Create output for HTML report depending on severity
+    issue_list.each do |issue|
+      if ['Warning'].include? issue[:severity]
+        $burp_summary += <<-SUMMARY
+          <tr class="warning">
+            <td>Burp</td>
+            <td>#{issue[:problem]}. Affected path: <b>#{issue[:path]}</b></td>
+            <td>
+              <a href="#{@web_results_path}/logs/burp_report.html#{issue[:url]}">Burp HTML report</a>
+            </td>
+          </tr>
+        SUMMARY
+        $burp_warnings_count += 1
+        $warnings_count += 1
+      else
+        $burp_summary += <<-SUMMARY
+          <tr class="failed">
+            <td>Burp</td>
+            <td>#{issue[:problem]}. Affected path: <b>#{issue[:path]}</b></td>
+            <td>
+              <a href="#{@web_results_path}/logs/burp_report.html#{issue[:url]}">Burp HTML report</a>
+            </td>
+          </tr>
+        SUMMARY
+        $burp_issues_count += 1
+      end
+    end
+
+    $issues_count += $burp_issues_count
+  end
+
+end

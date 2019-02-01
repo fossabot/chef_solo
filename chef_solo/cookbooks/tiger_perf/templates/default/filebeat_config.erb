@@ -1,0 +1,24 @@
+# ======= Filebeat prospectors =======
+
+filebeat.prospectors:
+- type: log
+  enabled: true
+  paths:
+    - <%= node['tiger_perf']['node_data_path'] %>/<%= node['tiger_perf']['tests_type'] %>_error.jtl
+  tags: ['EPM-TIGR']
+  close_inactive: 20m    # default 5m
+  scan_frequency: 1s    # default 10s
+
+  multiline.pattern: '^\s*<httpSample.+$'
+  multiline.negate: true
+  multiline.match: after
+  multiline.timeout: 5s
+
+# ======= Outputs =======
+
+output.logstash:
+  enabled: true
+  hosts: ['<%= node['tiger_perf']['rest_api_server'] %>:5044']
+
+logging.level: warning
+

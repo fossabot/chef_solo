@@ -1,0 +1,129 @@
+class JmeterMetricsHelper
+  require 'csv'
+  require 'builder'
+
+  def initialize ()
+  end
+
+  def generate_tr(sampler_label_name,scope_name,report_value,yellow_threshold,red_threshold,status)
+    @xm.tr(:class=>status) {
+     @xm.td sampler_label_name 
+     @xm.td scope_name
+     @xm.td report_value 
+     @xm.td yellow_threshold
+     @xm.td red_threshold
+   }
+  end
+
+  def analyze_metric(scope_name,sampler_label_name,red_threshold,yellow_threshold,report_value)
+     $logger.info "Applying KPI settings for #{sampler_label_name}, #{scope_name}:"
+     $logger.info " |- Red threshold: #{red_threshold}"
+     $logger.info " |- Yellow threshold: #{yellow_threshold}"
+     $logger.info " |- Comparing with report data: #{report_value}"
+     case scope_name
+       when /tps_rate/
+         if (report_value < red_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value,yellow_threshold,red_threshold,"failed")
+           @red_threshold_violations_count+=1
+         elsif (report_value < yellow_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value,yellow_threshold,red_threshold,"warning")
+           @yellow_threshold_violations_count+=1
+         end
+       when /aggregate_report_error/
+         if (report_value.to_f > red_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value.to_f.round(2),yellow_threshold,red_threshold,"failed")
+           @red_threshold_violations_count+=1
+         elsif (report_value.to_f > yellow_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value.to_f.round(2),yellow_threshold,red_threshold,"warning")
+           @yellow_threshold_violations_count+=1
+         end
+       else
+         if (report_value > red_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value,yellow_threshold,red_threshold,"failed")
+           @red_threshold_violations_count+=1
+         elsif (report_value > yellow_threshold)
+           generate_tr(sampler_label_name,scope_name,report_value,yellow_threshold,red_threshold,"warning")
+           @yellow_threshold_violations_count+=1
+         end
+     end
+  end
+
+  def generate_report(report_csv_path,kpi_csv_path,red_samplers_allowed_perc)
+    
+    @xm=Builder::XmlMarkup.new(:indent=>2, :margin=>2)
+    begin
+      report=CSV.read(report_csv_path,:headers => true,converters: :numeric)
+      kpi=CSV.read(kpi_csv_path,:headers => true,converters: :numeric)
+    rescue
+      $logger.fatal "Can't read #{report_csv_path} or #{kpi_csv_path} file"
+      exit 1
+    end
+
+    @yellow_threshold_violations_count=0
+    @red_threshold_violations_count=0
+
+     report['sampler_label'].each do |sampler_label_name|
+       analyze_metric=false
+       report_sampler_index=report['sampler_label'].index(sampler_label_name)
+       if (kpi['sampler_label'].include?(sampler_label_name))
+         kpi_record_index=kpi['sampler_label'].index(sampler_label_name)
+         scope_name=kpi[kpi_record_index][1]
+         report_scope_index=report.headers.index(scope_name)
+         yellow_threshold=kpi[kpi_record_index][2]
+         red_threshold=kpi[kpi_record_index][3]
+         report_value=report[report_sampler_index][report_scope_index]
+         analyze_metric(scope_name,sampler_label_name,red_threshold,yellow_threshold,report_value)
+        elsif (kpi['sampler_label'].include?('any'))
+          kpi_any_array=kpi.select{|item| item[0]=='any'}
+          kpi_any_array.each do |item| # checking all the KPIs for all the 'any' statements in the KPI CSV file
+            $logger.info "Analyzing ANY statement of the KPI file: #{item}"
+            scope_name=item[1]
+            report_scope_index=report.headers.index(scope_name)
+            yellow_threshold=item[2]
+            red_threshold=item[3]
+            report_value=report[report_sampler_index][report_scope_index]
+            analyze_metric(scope_name,sampler_label_name,red_threshold,yellow_threshold,report_value)
+          end
+        end
+
+      end
+
+    if (@yellow_threshold_violations_count > 0)||(@red_threshold_violations_count > 0)
+      table=<<-TABLE
+        <h2>Transactions analysis summary</h2>
+         <table class="performance-tests">
+          <tr>
+            <th>Sampler label</th>
+            <th>Scope</th>
+            <th>Aggregated value</th>
+            <th>Yellow threshold</th>
+            <th>Red threshold</th>
+          </tr>
+      #{@xm}
+        </table>
+      TABLE
+    end
+
+    total_samplers_count=report['sampler_label'].count
+    red_samplers_perc=100*@red_threshold_violations_count/total_samplers_count
+    results_hash={}
+    if (red_samplers_perc > red_samplers_allowed_perc)
+      results_hash['test_result']='FAILED'
+    elsif (@yellow_threshold_violations_count > 0)||(@red_threshold_violations_count > 0)
+      results_hash['test_result']='WARNING'
+    else
+      results_hash['test_result']='OK'
+    end
+
+    $logger.info "red_samplers_allowed_perc: #{red_samplers_allowed_perc}"
+    $logger.info "red_samplers percentage from the test results: #{red_samplers_perc}"
+    $logger.info "Red threshold violations count: #{@red_threshold_violations_count}"
+    $logger.info "Total analyzed samplers: #{total_samplers_count}"
+    $logger.info "Test result: #{results_hash['test_result']}"
+
+
+    results_hash['table_markup']=table
+#    $logger.info "Test results hash: #{results_hash}"
+    return results_hash
+  end
+end

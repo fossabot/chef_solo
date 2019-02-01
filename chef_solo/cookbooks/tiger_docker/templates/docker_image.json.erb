@@ -1,0 +1,19 @@
+{
+  "run_list": [ "recipe[tiger_common::w3af_installation]",
+                "recipe[tiger_common::users_setup]",
+                "recipe[tiger_common::git_sync]",
+                "recipe[tiger_common::system_soft_install]",
+                "recipe[tiger_common::sslyze_installation]",
+                "recipe[tiger_common::zap_install]",
+                "recipe[tiger_common::masscan_install]",
+                "recipe[tiger_common::jmeter_install]",
+                "recipe[tiger_common::nmap_installation]",
+                "recipe[tiger_common::nikto_installation]",
+                "recipe[tiger_elk::filebeat_install]",
+                "recipe[tiger_common::collectd_install]"
+  ],
+  "tiger_common":{
+    "collectd_server_path": "<%= node['default_host_ip'] %>"
+  },
+  "user_secret":""
+}

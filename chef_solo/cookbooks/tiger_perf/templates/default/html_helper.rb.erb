@@ -1,0 +1,36 @@
+class Html_request
+  require 'json'
+  require 'time'
+  require 'net/http'
+#  require_relative 'encr_helper.rb'
+
+  def send (host,port,path,data)
+#    encr=Encr.new
+#    signature=encr.sign(data)
+#    puts "Initial data"
+#    puts data.to_s
+#    data['signature']=signature
+#    puts "Signed data: "+signature
+    http = Net::HTTP.new(host,port)
+    http.use_ssl = true
+    http.ca_file="<%= node['tiger_perf']['scripts_path'] %>/certs/rootca.cer"
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE  #OpenSSL::SSL::VERIFY_PEER
+    http.verify_depth = 5
+ 
+    req = Net::HTTP::Post.new(path, {'Content-Type' =>'application/json'})
+    puts "Signed data to #{host} with port = #{port} "
+    puts data.to_s
+    req.body=data.to_json
+    response=http.start do |http|
+      http.request(req)
+    end
+    return response.body 
+  end
+
+end
+
+
+
+
+
+

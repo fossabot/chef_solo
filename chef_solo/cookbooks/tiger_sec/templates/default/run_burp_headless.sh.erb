@@ -1,0 +1,7 @@
+echo "Executing: java -jar -Xmx2g -Djava.awt.headless=true /headless/burp/<%= node['tiger_sec']['burp_jar_file_name'] %> https <%= node['tiger_sec']['target_host'] %> <%= node['tiger_sec']['target_port'] %> <%= node['tiger_sec']['node_logs_path'] %>"
+
+java -jar -Xmx2g -Djava.awt.headless=true /headless/burp/<%= node['tiger_sec']['burp_jar_file_name'] %> <%= node['tiger_sec']['burp_cmd_params'] %> 
+# to get attribute $1 --unpause-spider-and-scanner
+
+cp IntegrisSecurity*  <%= node['tiger_sec']['node_logs_path'] %>/burp_report.html 
+

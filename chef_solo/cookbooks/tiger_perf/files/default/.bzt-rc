@@ -1,0 +1,3 @@
+modules:
+  jmeter:
+    path: /opt/tiger/software/jmeter/bin/jmeter

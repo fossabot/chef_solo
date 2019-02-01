@@ -1,0 +1,6 @@
+{ "run_list": [
+    "recipe[tiger_common::grafana_install]"
+   ],
+  "secret": "",
+  "user_secret":""
+} 

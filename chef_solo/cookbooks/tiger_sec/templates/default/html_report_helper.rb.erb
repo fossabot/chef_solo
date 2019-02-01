@@ -1,0 +1,186 @@
+class Html_report
+  require 'json'
+  require 'time'
+  require 'fileutils'
+
+  def initialize
+    @node_results_path="<%= node['tiger_sec']['node_results_path'] %>"
+    @markup_path='<%= node['tiger_sec']['node_results_path'] %>/markup'
+    @build_number='<%= node['tiger_sec']['build_number'] %>'
+    @full_sol_name='<%= node['tiger_sec']['full_sol_name'] %>'
+    @web_results_path='<%= node['tiger_sec']['web_results_path'] %>'
+    @grafana_server='<%= node['tiger_sec']['grafana_server'] %>'
+    @report=''
+  end
+
+  def generate_grafana_iframe(dashboard_name,org_id,panel_id,test_started,test_finished,grafana_vars_hash)
+    vars_str=grafana_vars_hash.map{|k,v| "#{k}=#{v}"}.join('&')
+    gr_from=Time.now-(15*24*60*60) # -15 days
+    gr_to=(test_finished+5).to_i.to_s+"000"
+    link="<iframe src=\"https://#{@grafana_server}/grafana/dashboard-solo/db/#{dashboard_name}?orgId=#{org_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}&panelId=#{panel_id}\" width=\"450\" height=\"400\" frameborder=\"0\"></iframe>"
+    return link
+  end
+
+  def generate_grafana_full_dashboard_link(dashboard_name,org_id,test_started,test_finished,grafana_vars_hash)
+    vars_str=grafana_vars_hash.map{|k,v| "#{k}=#{v}"}.join('&')
+    gr_from=Time.now-(15*24*60*60) # -15 days
+    gr_to=(test_finished+5).to_i.to_s+"000"
+    link="<a href=\"https://#{@grafana_server}/grafana/dashboard/db/#{dashboard_name}?orgId=#{org_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\">Full Grafana statistics</a>"
+    return link
+  end
+
+  def generate_caption(status)
+    caption=<<-CAPTION
+      <div class="content">
+        <h1>Security tests has been COMPLETED for the #{@full_sol_name} project</h1>
+    CAPTION
+    case status
+    when "error"
+      caption+=<<-ERROR
+        <div class="status failed ">
+         <svg xmlns="http://www.w3.org/2000/svg" width="30" height="31" viewBox="0 0 30 31">
+             <g fill="none" fill-rule="evenodd">
+                 <path d="M0 0h30v31H0z"/>
+                 <path fill="#FF8B47" fill-rule="nonzero" d="M14.5 2C7.6 2 2 7.824 2 15s5.6 13 12.5 13S27 22.176 27 15 21.4 2 14.5 2zM16 22h-3v-3h3v3zm0-6h-3V8h3v8z"/>
+             </g>
+         </svg>
+         <div>
+             <p>Security tests were FAILED!</p>
+             <p>#{$issues_count} vulnerabilities were found</p>
+             <p>Pipeline will be stopped.</p>
+          </div>
+        </div>
+      ERROR
+    when "warning"
+      caption+=<<-WARN
+        <div class="status warning ">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+            <g fill="none" fill-rule="evenodd">
+               <path d="M0 0h30v30H0z"/>
+               <path fill="#FAE934" fill-rule="nonzero" d="M0 27h30L15 1 0 27zm17-4h-3v-3h3v3zm0-6h-3v-5h3v5z"/>
+            </g>
+          </svg>
+          <span>Security tests were finished with WARNING!</span>
+        </div>
+      WARN
+    when "ok"
+      caption+=<<-OK
+        <div class="status passed ">
+          <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="30" height="30" viewBox="0 0 30 30">
+            <defs>
+              <rect id="a" width="338" height="48" rx="2"/>
+            </defs>
+            <g fill="none" fill-rule="evenodd">
+              <path fill="#60D179" fill-rule="nonzero" d="M22.5 8.75l-1.762-1.763-7.925 7.925 1.762 1.763L22.5 8.75zm5.3-1.763L14.575 20.212 9.35 15l-1.762 1.762 6.987 6.988 15-15L27.8 6.987zM.512 16.762L7.5 23.75l1.762-1.762L2.287 15 .513 16.762z"/>
+            </g>
+          </svg>
+          <span>Security tests were PASSED</span>
+        </div>
+      OK
+    end
+
+    return caption
+  end
+
+  def generate(test_started,test_finished)
+
+    header=File.read("#{@markup_path}/header.html")
+    @report+=header
+
+
+    issues_summary=''
+    if ($issues_count >0) || ($warnings_count > 0)
+      if $issues_count > 0
+        @report+=generate_caption('error')
+      else
+        @report+=generate_caption('warning')
+      end
+
+      test_settings=File.read("#{@markup_path}/tests_settings.html")
+      @report+=test_settings
+
+      ### Grafana Dashboard ###
+      grafana_vars_hash={
+      "var-projectName"=>$project_id,
+      "var-envType"=>$env_type,
+      "var-testType"=>$tests_type,
+      "var-buildID_1"=>$current_build_number
+      }
+
+      @report += "<h2>Grafana based builds statistics for the latest 15 days</h2>"
+      @report += generate_grafana_iframe("security-tests-dashboard","1","1",test_started,test_finished,grafana_vars_hash)
+      @report += generate_grafana_full_dashboard_link("security-tests-dashboard","1",test_started,test_finished,grafana_vars_hash)+"<br>\n"
+
+      @report+="<h2>Detailed security tests information</font></h2>"
+      @report+=<<-SUMMARY
+        <table class="security-tests">
+          <tr>
+            <th>Tool name</th> <th>Description</th> <th>Log file link</th>
+          </tr>
+      SUMMARY
+
+      if ($sslyze_issues_count >0)
+        @report+=$sslyze_summary
+      end
+
+      if ( $masscan_issues_count )
+        @report += $masscan_summary
+      end
+
+      if ( $nmap_issues_count )
+        @report+=$nmap_summary
+      end
+
+      if ( $nikto_issues_count )
+        @report+=$nikto_summary
+      end
+
+      if ( $burp_issues_count )
+        @report+=$burp_summary
+      end
+
+      if ( $zap_issues_count )
+        @report+=$zap_summary
+      end
+
+      if ( $w3af_issues_count )
+        @report+=$w3af_summary
+      end
+
+      if ( $qualys_issues_count )
+        @report+=$qualys_summary
+      end
+
+
+      @report+="</table>"
+      @report+="<ul><li><a href=\"#{@web_results_path}/logs\">Tests log files</a></li></ul>"
+      @report+=<<-TIME
+        <table class="test-info">
+          <tr>
+            <td>Test duration</td>
+            <td>#{$tests_duration} sec</td>
+          </tr>
+        </table>
+      TIME
+    else
+      @report+=generate_caption('ok')
+      test_settings=File.read("#{@markup_path}/tests_settings.html")
+      @report+=test_settings+"<br> \n"
+      @report+="<h2>Detailed security tests information</h2>\n"
+      @report+="<li><a href=\"#{@web_results_path}/logs\">Tests log files</a></li>"
+      @report+=<<-TIME
+        <table class="test-info">
+          <tr>
+            <td>Test duration</td>
+            <td>#{$tests_duration} sec</td>
+          </tr>
+        </table>
+      TIME
+    end
+
+    footer=File.read("#{@markup_path}/footer.html")
+    @report+=footer
+
+    File.write("#{@node_results_path}/tests_summary.html",@report)
+  end
+end

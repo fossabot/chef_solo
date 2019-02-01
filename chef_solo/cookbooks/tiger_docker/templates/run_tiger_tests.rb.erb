@@ -1,0 +1,26 @@
+require 'json'
+
+cmds=["chown -R tiger /opt/tiger/epm-tigr"]
+cmds.push "cd /opt/tiger/epm-tigr && runuser tiger -c \'git checkout master && git pull\'"
+
+case ARGV[1]
+  when "sec"
+    cmds.push "chef-client -z -c /opt/tiger/epm-tigr/chef_solo/solo.rb -j /opt/tiger/epm-tigr/chef_solo/dna_#{ARGV[0]}.json -o \'recipe[tiger_sec]\'"# --logfile /opt/tiger/epm-tigr/chef_solo/chef-solo.log"
+    cmds.push "ruby /opt/tiger/security/scripts/run_security_tests.rb"
+  when "perf"
+    cmds.push "chef-client -z -c /opt/tiger/epm-tigr/chef_solo/solo.rb -j /opt/tiger/epm-tigr/chef_solo/dna_#{ARGV[0]}.json -o \'recipe[tiger_perf]\' --logfile /opt/tiger/epm-tigr/chef_solo/chef-solo.log"
+    cmds.push "ruby /opt/tiger/performance/scripts/run_performance_tests.rb"
+end
+
+
+
+cmds.each do |cmd|
+  unless (system(cmd))
+    dna_json=JSON.parse File.read("/opt/tiger/epm-tigr/chef_solo/dna_#{ARGV[0]}.json")
+    # updating task stus on the REST API server
+    puts "Command #{cmd} \n\n failed, updating tasks status"
+    puts "Executing curl -k -X POST --data \"id=#{dna_json['task_id']}&result=finished%20with%20Error:700\" https://#{dna_json['rest_api_fqdn']}/job/update"
+    `curl -k -X POST --data \"id=#{dna_json['job_id']}&result=finished%20with%20Error:7700\" https://#{dna_json['lc_ip']}/job/update`
+    exit 1
+  end
+end

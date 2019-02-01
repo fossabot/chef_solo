@@ -1,0 +1,35 @@
+class Taurus_test
+  require 'json'
+  require 'time'
+  require 'fileutils'
+
+  def initialize (taurus_yml_path)
+    $taurus_issues_count=0
+#    @target_host='<%= node['tiger_perf']['target_host'] %>'
+#    @target_port='<%= node['tiger_perf']['target_port'] %>'
+    @log_path='<%= node['tiger_perf']['node_logs_path'] %>/taurus.txt'
+    @data_path='<%= node['tiger_perf']['node_data_path'] %>/taurus'
+    @env_type_path='<%= node['tiger_perf']['env_type_path'] %>'
+    @taurus_yml_path=taurus_yml_path
+    @taurus_files_path=Pathname.new(@taurus_yml_path).parent
+#    @web_results_path='<%= node['tiger_perf']['web_results_path'] %>'
+#    @node_results_path='<%= node['tiger_perf']['node_results_path'] %>'
+#    @tests_type='<%= node["tiger_perf"]["tests_type"] %>'
+#    @scripts_path='<%= node['tiger_perf']['scripts_path'] %>'
+  end
+
+  def run_test
+    Dir.chdir @env_type_path
+    $logger.info "Taurus files path: #{@taurus_files_path}"
+    FileUtils.cp "#{@env_type_path}/plan/taurus/#{$test_type}.jmx", @taurus_files_path
+    @tests_cmd="bzt #{@taurus_yml_path}"
+    $logger.info "Running #{@tests_cmd}"
+    cmd_output=`#{@tests_cmd}`
+    File.write(@log_path,cmd_output)
+    artifacts_dir=cmd_output[/Artifacts dir:.+$/].split(' ').last    
+    Dir.mkdir @data_path
+    FileUtils.cp_r artifacts_dir, @data_path
+    
+  end
+
+end

@@ -1,0 +1,46 @@
+class Influx
+  # All actons with InfluxDB
+  require 'influxdb'
+  require 'time'
+
+  def initialize 
+    @version_id      = "<%= node['tiger_sec']['version_id'] %>"
+    @influx_protocol = "<%= node['tiger_sec']['influxdb_protocol'] %>"
+    @influx_host     = "<%= node['tiger_sec']['influx_host'] %>"
+    @influx_port     = "<%= node['tiger_sec']['influx_port'] %>"
+    @influx_db       = "<%= node['tiger_sec']['influx_db'] %>"
+    @influx_username = "<%= node['influxdb']['influx_admin'] %>"
+    @influx_password = "<%= node['influxdb']['influx_admin_pass'] %>"
+  end
+
+  
+  def sendDataToInfluxDB(tool_name,scope,issues_count,warnings_count,time)
+    influxdbUrl = "#{@influx_protocol}://#{@influx_host}:#{@influx_port}/"
+    influxdbDatabase = "#{@influx_db}"
+    influxdb = InfluxDB::Client.new influxdbDatabase,
+               url: influxdbUrl,
+               username: @influx_username,
+               password: @influx_password
+
+    data = {
+      series: "sec_tools_results",
+      tags: {
+        buildID: "#{$current_build_number}",
+        version_id: "#{@version_id}",
+        tool_name: "#{tool_name}",
+        scope: "#{scope}",
+        envType: "#{$env_type}",
+        projectName: "#{$project_id}",        
+        testType: "#{$tests_type}"
+      },
+      values: {
+        issues_count: issues_count,
+        warnings_count: warnings_count
+      },
+      timestamp: time
+    }
+    influxdb.write_points(data,"s") # send data with time precision
+    $logger.info "Data for #{tool_name} was sent to InfluxDB" 
+  end
+
+end

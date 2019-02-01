@@ -1,0 +1,13 @@
+#!/bin/bash
+sleep 5
+# Create default datasource for collectd metrics
+curl -k 'https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/datasources' -X POST -H 'Content-Type: application/json;charset=UTF-8' \
+ --data-binary '{"name":"collectd","type":"influxdb","url":"http://localhost:8086","access":"proxy","isDefault":true,"database":"collectd","user":"<%= node['influxdb']['influx_admin'] %>", "password":"<%= node['influxdb']['influx_admin_pass'] %>"}'
+
+# Create datasource for Jmeter metrics
+curl -k 'https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/datasources' -X POST -H 'Content-Type: application/json;charset=UTF-8' \
+ --data-binary '{"name":"Jmeter","type":"influxdb","url":"http://localhost:8086","access":"proxy","isDefault":false,"database":"jmeter","user":"<%= node['influxdb']['influx_admin'] %>", "password":"<%= node['influxdb']['influx_admin_pass'] %>"}'
+
+# Create datasource for Security metrics
+curl -k 'https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/datasources' -X POST -H 'Content-Type: application/json;charset=UTF-8' \
+ --data-binary '{"name":"security_tests","type":"influxdb","url":"http://localhost:8086","access":"proxy","isDefault":false,"database":"security_tests","user":"<%= node['influxdb']['influx_admin'] %>", "password":"<%= node['influxdb']['influx_admin_pass'] %>"}'

@@ -1,0 +1,198 @@
+class Html_report
+  require 'json'
+  require 'time'
+  require 'fileutils'
+
+  def initialize    
+    @node_results_path="<%= node['tiger_perf']['node_results_path'] %>"
+    @markup_path='<%= node['tiger_perf']['node_results_path'] %>/markup'
+    @build_number='<%= node['tiger_perf']['build_number'] %>'
+    @full_sol_name='<%= node['tiger_perf']['full_sol_name'] %>'
+    @web_results_path='<%= node['tiger_perf']['web_results_path'] %>'
+    @report=''
+    @grafana_server='<%= node['tiger_perf']['grafana_server'] %>'
+    @common_web_results_path='<%= node['tiger_perf']['common_web_results_path'] %>'
+  end
+
+  def generate_grafana_iframe(dashboard_name,org_id,panel_id,test_started,test_finished,grafana_vars_hash)
+    vars_str=grafana_vars_hash.map{|k,v| "#{k}=#{v}"}.join('&')
+    gr_from=(test_started-5).to_i.to_s+"000"
+    gr_to=(test_finished+5).to_i.to_s+"000"
+    if (vars_str!='')
+      link="<iframe src=\"https://#{@grafana_server}/grafana/dashboard-solo/db/#{dashboard_name}?orgId=#{org_id}&panelId=#{panel_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\" width=\"450\" height=\"400\" frameborder=\"0\"></iframe>"
+    elsif (dashboard_name=='system-stat')
+      link="<iframe src=\"https://#{@grafana_server}/grafana/dashboard-solo/db/#{dashboard_name}?orgId=#{org_id}&panelId=#{panel_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\" width=\"450\" height=\"400\" frameborder=\"0\"></iframe>"
+    else
+      link="<iframe src=\"https://#{@grafana_server}/grafana/dashboard-solo/db/#{dashboard_name}?orgId=#{org_id}&panelId=#{panel_id}&from=#{gr_from}&to=#{gr_to}\" width=\"450\" height=\"400\" frameborder=\"0\"></iframe>"
+    end    
+    return link
+  end
+
+  def generate_grafana_full_dashboard_link(dashboard_name,org_id,test_started,test_finished,grafana_vars_hash)
+    vars_str=grafana_vars_hash.map{|k,v| "#{k}=#{v}"}.join('&')
+    gr_from=(test_started-5).to_i.to_s+"000"
+    gr_to=(test_finished+5).to_i.to_s+"000"
+    if (dashboard_name=='jmeter-load-test')
+      link="<a href=\"https://#{@grafana_server}/grafana/dashboard/db/#{dashboard_name}?orgId=#{org_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\">Full Jmeter test statistics</a>"
+    elsif (dashboard_name=='system-stat')
+      link="<a href=\"https://#{@grafana_server}/grafana/dashboard/db/#{dashboard_name}?orgId=#{org_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\">Full system stat</a>"
+    elsif (dashboard_name=='compare-results-dashboard')
+      link="<a href=\"https://#{@grafana_server}/grafana/dashboard/db/#{dashboard_name}?orgId=#{org_id}&from=#{gr_from}&to=#{gr_to}&#{vars_str}\">Full last 15 days Jmeter statistics</a>"
+    end    
+    return link
+  end
+
+  def generate_caption(status)
+    caption=<<-CAPTION
+      <div class="content">
+        <h1>Performance tests has been COMPLETED for the #{@full_sol_name} project</h1>          
+    CAPTION
+    case status
+    when "error"
+      caption+=<<-ERROR
+        <div class="status failed ">
+         <svg xmlns="http://www.w3.org/2000/svg" width="30" height="31" viewBox="0 0 30 31">
+             <g fill="none" fill-rule="evenodd">
+                 <path d="M0 0h30v31H0z"/>
+                 <path fill="#FF8B47" fill-rule="nonzero" d="M14.5 2C7.6 2 2 7.824 2 15s5.6 13 12.5 13S27 22.176 27 15 21.4 2 14.5 2zM16 22h-3v-3h3v3zm0-6h-3V8h3v8z"/>
+             </g>
+         </svg>
+         <div>
+             <p>Perfomance tests were FAILED!</p>
+             <p>Pipeline will be stopped.</p>
+          </div>
+        </div>
+      ERROR
+    when "warning"
+      caption+=<<-WARN
+        <div class="status warning ">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+            <g fill="none" fill-rule="evenodd">
+               <path d="M0 0h30v30H0z"/>
+               <path fill="#FAE934" fill-rule="nonzero" d="M0 27h30L15 1 0 27zm17-4h-3v-3h3v3zm0-6h-3v-5h3v5z"/>
+            </g>
+          </svg>
+          <span>Performance tests were finished with WARNING!</span>
+        </div>
+      WARN
+    when "ok"
+      caption+=<<-OK
+        <div class="status passed ">
+          <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="30" height="30" viewBox="0 0 30 30">
+            <defs>
+              <rect id="a" width="338" height="48" rx="2"/>
+            </defs>
+            <g fill="none" fill-rule="evenodd">
+              <path fill="#60D179" fill-rule="nonzero" d="M22.5 8.75l-1.762-1.763-7.925 7.925 1.762 1.763L22.5 8.75zm5.3-1.763L14.575 20.212 9.35 15l-1.762 1.762 6.987 6.988 15-15L27.8 6.987zM.512 16.762L7.5 23.75l1.762-1.762L2.287 15 .513 16.762z"/>
+            </g>
+          </svg>
+          <span>Performance tests were PASSED</span>
+        </div>
+      OK
+    end
+
+    return caption
+  end
+
+  # generating tool-specific links
+  def generate_report_links(tool_name)
+    links_ar=[]
+    links_ar.push "<ul>"
+    if ( !defined? $last )
+      case tool_name
+        when "jmeter"
+          links_ar.push "<li><a href=\"#{@web_results_path}/HTML\">Jmeter HTML reports</a></li>"
+        when "taurus"
+          links_ar.push "<li><a href=\"#{@web_results_path}/data\">Taurus data files</a></li>"
+      end
+    end
+    if ( defined? $last ) 
+      @web_results_path = '<%= node['tiger_perf']['web_aggregated_results_path'] %>'
+      for i in 1..$lg_count.to_i do
+        links_ar.push "<li><a href=\"#{@common_web_results_path}/nail-#{i}/#{$test_type}/tests_summary.html\">Nail-#{i} performance tests report</a></li>"
+      end
+    end
+    if ( $elk_enabled == true )
+      links_ar.push "<li><a href=\"https://#{$lc_fqdn}/kibana\">Kibana</a></li>"
+    end
+    links_ar.push "<li><a href=\"#{@web_results_path}/logs\">Tests execution log files</a></li>"
+    links_ar.push "<li><a href=\"#{@web_results_path}/data\">Performance tests data files</a></li>"
+    links_ar.push "</ul>"
+    return links_ar
+  end
+
+  # generating main page
+  def generate(tool_name,jmeter_metrics_analyzer_results_hash,test_started,test_finished)
+    
+    header=File.read("#{@markup_path}/header.html")
+    @report+=header
+
+    issues_summary=''
+
+    if ( defined? $last )
+      test_settings=File.read("#{@markup_path}/tests_settings.html").gsub(/<tr><td>Docker container ID.*/,'') # deleting LG ID from aggregated report.
+    else
+      test_settings=File.read("#{@markup_path}/tests_settings.html")
+    end
+
+    if (jmeter_metrics_analyzer_results_hash['test_result']=='FAILED')      
+      @report+=generate_caption('error')
+    elsif (jmeter_metrics_analyzer_results_hash['test_result']=='WARNING')
+      @report+=generate_caption('warning')
+    else
+      @report+=generate_caption('ok')
+    end
+    
+    # Begining of Detailed test settings
+    @report += test_settings
+    @report += "<tr><td>Maximum amount of initialized threads</td> <td>#{$initNumThreads}</td></tr>"
+    @report += "<tr><td>Test duration</td> <td class='last'>#{test_started.strftime('%d/%m/%y %k:%M')} - #{test_finished.strftime('%k:%M')} UTC:#{test_started.strftime('%:::z')} (#{$tests_duration} sec)</td></tr>"
+    @report += "</table>"
+    # End of Detailed test settings
+    
+    if (jmeter_metrics_analyzer_results_hash['test_result'] == 'FAILED') || (jmeter_metrics_analyzer_results_hash['test_result'] == 'WARNING')
+      @report += jmeter_metrics_analyzer_results_hash['table_markup']
+    end
+
+    @report+="<h2>Detailed performance test information</h2>"
+    @report+=generate_report_links(tool_name).join("\n")
+
+    grafana_vars_hash={
+      "var-request"=>"All",
+      "var-testName"=>$test_type,
+      "var-envType"=>$env_type,
+      "var-projectID"=>$project_id,
+      "var-responseCode"=>"All",
+      "var-aggregation"=>"$__auto_interval"
+    }
+
+    @report += "<h2>Grafana based test statistics</h2>"
+    if ( !defined? $last )
+      grafana_vars_hash["var-lg"] = "<%= node['fqdn'] %>"
+    end
+    @report += generate_grafana_iframe("jmeter-load-test","1","6",test_started,test_finished,grafana_vars_hash)
+    @report += generate_grafana_full_dashboard_link("jmeter-load-test","1",test_started,test_finished,grafana_vars_hash)+"<br>\n"
+
+    @report+="<h2>Grafana based builds statistics for the latest 15 days</h2>"
+    test_started_15d=Time.now-(15*24*60*60)
+    grafana_vars_hash["var-aggregateMetricType"]="aggregate_report_max"
+    grafana_vars_hash["var-buildID"]="All"
+    
+    @report += generate_grafana_iframe("compare-results-dashboard","1","1",test_started_15d,test_finished,grafana_vars_hash)
+    @report += generate_grafana_full_dashboard_link("compare-results-dashboard","1",test_started_15d,test_finished,grafana_vars_hash)+"<br>\n"
+
+
+    grafana_vars_hash={}
+    @report += "<h2>Grafana based Docker host and container RAM usage statistics</h2>"
+    @report += generate_grafana_iframe("system-stat","1","2",test_started,test_finished,grafana_vars_hash)
+    @report += generate_grafana_full_dashboard_link("system-stat","1",test_started,test_finished,grafana_vars_hash)+"<br>\n"
+
+
+    footer=File.read("#{@markup_path}/footer.html")
+    @report+=footer
+    
+    File.write("#{@node_results_path}/tests_summary.html",@report)
+
+  end
+  
+end

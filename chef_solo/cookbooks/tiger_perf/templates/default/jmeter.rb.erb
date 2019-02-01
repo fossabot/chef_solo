@@ -1,0 +1,199 @@
+class Jmeter_test
+  require 'json'
+  require 'yaml'
+  require 'open3'
+  require 'pathname'
+  require 'fileutils'
+  require_relative 'tiger_extension.rb'
+
+  def initialize (jmeter_yml_path)
+    @jmeter_yml_path=jmeter_yml_path
+    @jmeter_lib_path = "<%= node['tiger_perf']['env_type_path'] %>"
+    @jmeter_files_path=Pathname.new(jmeter_yml_path).parent
+    @lg_id="<%= node['container_name'] %>"
+    @influx_protocol="<%= node['tiger_perf']['influxdb_protocol'] %>"
+    @influx_host="<%= node['tiger_perf']['influx_host'] %>"
+    @influx_port="<%= node['tiger_perf']['influx_port'] %>"
+    @influx_db="<%= node['tiger_perf']['influx_db'] %>"
+    @influx_username="<%= node['influxdb']['influx_admin'] %>"
+    @influx_password="<%= node['influxdb']['influx_admin_pass'] %>"
+    @tiger_client_jmeter_cmd_params="<%= node['tiger_perf']['jmeter_cmd_params'] %>"
+    @target_host='<%= node['tiger_perf']['target_host'] %>' # target host definition in TIGER client
+    @target_port='<%= node['tiger_perf']['target_port'] %>' # target port definition in TIGER client
+  end
+
+  def copy_jmeter_artifacts     
+    $logger.info "Copying Jmeter artifacts from #{@jmx_file_path}"
+    $logger.info "#{@jmx_file_path} directory listing:"
+    $logger.info `ls -alh #{@jmx_file_path}`
+     Dir.glob("#{@jmx_file_path}/*").each do |file| 
+       $logger.info "  |- Processing #{file}" 
+       FileUtils.cp file,$data_path unless (file =~ /\.jmx/) # copying all files excluding jmx from plans folder to support SimpleDataWriter functionality
+     end
+  end
+
+  def copy_jmeter_gc_logs     
+    $logger.info "Copying Jmeter gc_logs from /opt/tiger/logs"
+     Dir.glob("/opt/tiger/logs/*").each do |file| 
+       $logger.info "  |- Processing #{file}" 
+       FileUtils.cp file,$logs_path  # copying all files from /opt/tiger/logs
+     end
+  end
+
+  def generate_aggregated_report
+    jtl_path="#{$data_path}/#{$test_type}.jtl"
+    jmeter_conf=YAML.load_file(@jmeter_yml_path)
+    properties_file=jmeter_conf['jmeter']['properties']
+    #    ./JMeterPluginsCMD.sh --tool Reporter --generate-csv test.csv --input-jtl input.jtl --plugin-type AggregateReport
+    jmeter_bin_folder=Pathname.new(@jmeter_executable_path).parent
+    cmd=[
+          "bash #{jmeter_bin_folder}/JMeterPluginsCMD.sh",
+          "--tool Reporter --generate-csv #{$data_path}/#{$test_type}.csv",
+          "--input-jtl #{jtl_path} --plugin-type AggregateReport"
+        ].join(' ')
+    stdout, stderr, status=Open3.capture3(cmd)
+    $logger.info "  |- Generating aggregated CSV file"
+    $logger.info "    |- Executing #{cmd}"
+    $logger.info "    |- status: #{status}"
+    $logger.info "    |- stdout: #{stdout}"
+    $logger.info "    |- stderr: #{stderr}"
+
+    # Added
+    lines = File.readlines("#{$data_path}/#{$test_type}.csv")
+    lines[0] = 'sampler_label,aggregate_report_count,average,aggregate_report_median,aggregate_report_90%_line,aggregate_report_95%_line,aggregate_report_99%_line,aggregate_report_min,aggregate_report_max,aggregate_report_error%,aggregate_report_rate,aggregate_report_bandwidth,aggregate_report_stddev' << $/
+    File.open("#{$data_path}/#{$test_type}.csv", 'w') { |f| f.write(lines.join) }
+    #######
+
+    # generating graphs
+    Dir.mkdir "#{$node_results_path}/HTML" unless (File.exists?("#{$node_results_path}/HTML"))
+    cmd="#{@jmeter_executable_path} -p #{@jmeter_files_path}/#{properties_file} -g #{$data_path}/#{$test_type}_html_report.csv -o #{$node_results_path}/HTML"
+    stdout, stderr, status=Open3.capture3(cmd)
+    $logger.info "  |- Generating HTML report:"
+    $logger.info "    |- Executing #{cmd}"
+    $logger.info "    |- status: #{status}"
+    $logger.info "    |- stdout: #{stdout}"
+    $logger.info "    |- stderr: #{stderr}"
+  end
+
+  def prepare_jmeter_cmd
+    jmeter_conf=YAML.load_file(@jmeter_yml_path)
+    @jmeter_executable_path=jmeter_conf['jmeter']['path'] + ".sh"
+    plan_file_name=jmeter_conf['jmeter']['plan']
+    properties_file_name=jmeter_conf['jmeter']['properties']
+    cmd_options_hash={}
+
+    if (@tiger_client_jmeter_cmd_params!='')
+      @tiger_client_jmeter_cmd_params.gsub!("-J",'')
+      cmd_ar=@tiger_client_jmeter_cmd_params.split(' ')      
+      cmd_ar.each do |cmd_arg|
+        parameters_ar=cmd_arg.split('=')
+        cmd_options_hash[parameters_ar[0]]=parameters_ar[1]
+      end      
+    else      
+      cmd_options_hash=jmeter_conf['jmeter']['cmd_options']
+    end
+
+    # overriding target_host parameter from TIGER client
+    if (@target_host!='')
+      cmd_options_hash['target_host']=@target_host
+    end
+
+    # overriding target_port parameter from TIGER client
+    if (@target_port!='')
+      cmd_options_hash['target_port']=@target_port
+    end
+
+
+    $red_samplers_allowed_perc=jmeter_conf['red_threshold']
+
+    internal_jmeter_cmd_options_hash={
+      "build.id"=>"#{$current_build_number.to_i}",
+      "report.csv"=>"#{$data_path}/#{$test_type}_html_report.csv",
+      "errors.jtl"=>"#{$data_path}/#{$test_type}_error.jtl",
+      "test.type"=>"#{$test_type}",
+      "lg.id"=>"#{@lg_id}",
+      "influx.protocol"=>"#{@influx_protocol}",
+      "influx.host"=>"#{@influx_host}",
+      "influx.port"=>"#{@influx_port}",
+      "influx.db"=>"#{@influx_db}",
+      "project.id"=>"#{$project_id}",
+      "influx.username"=>"#{@influx_username}",
+      "influx.password"=>"#{@influx_password}",
+      "env.type"=>"#{$env_type}"
+    }
+
+    cmd_options_hash=internal_jmeter_cmd_options_hash.merge(cmd_options_hash)
+    cmd_options_hash_for_logging=cmd_options_hash
+    #cmd_options_hash_for_logging["influx.password"]='*****'
+
+    cmd_options=cmd_options_hash.map{|k,v| "-J#{k}=#{v}"}.join(' ')
+    $logger.info "Executing Jmeter test with the following settings:"
+    $logger.info "  |- plan_file_name=#{plan_file_name}"
+    $logger.info "  |- properties_file_name=#{properties_file_name}"
+    $logger.info "  |- cmd_options: \n#{cmd_options_hash_for_logging.map{|k,v| "-J#{k}=#{v}"}.join("\n")}"
+
+
+    # Copying libs from performance repo to jmeter's lib folder
+    path_to_jmeter_libs = Pathname.new(jmeter_conf['jmeter']['path']).parent.parent.to_s + "/lib"
+    if (Dir.exist?(@jmeter_lib_path + "/lib"))
+      $logger.info "Copying jmeter custom libs into #{path_to_jmeter_libs}"
+      FileUtils.cp_r "#{@jmeter_lib_path}/lib/.", path_to_jmeter_libs
+    end    
+    FileUtils.cp "/tmp/CompositeBackendListener/out/artifacts/InfluxBackendListener_jar/InfluxBackendListenerClient.jar", "#{path_to_jmeter_libs}/ext"
+    libs_list=`ls -alh #{path_to_jmeter_libs}`
+    $logger.info "  |- Jmeter #{jmeter_conf['jmeter']['libs_path']} folder contents: #{libs_list}"
+    libs_ext_list=`ls -alh #{path_to_jmeter_libs}/ext`
+    $logger.info "  |- Jmeter #{jmeter_conf['jmeter']['libs_path']}/ext folder contents: #{libs_ext_list}"
+
+
+    # Extending JMX file with TIGER specific settings
+    tiger_extension=TigerExtension.new("#{@jmeter_files_path}/#{plan_file_name}",$tiger_extensions_path)
+    @jmx_file_path=Pathname.new("#{@jmeter_files_path}/#{plan_file_name}").parent
+
+    extended_jmeter_plan=tiger_extension.extend_jmeter_jmx
+
+    @full_jmeter_cmd=[
+      "#{@jmeter_executable_path} -n",
+      "-t #{extended_jmeter_plan}",
+      "-p #{@jmeter_files_path}/#{properties_file_name}",
+      cmd_options,
+      "-l #{$data_path}/#{$test_type}.jtl",
+      "-j #{$logs_path}/jmeter_#{$test_type}.log"
+    ].join(' ')
+    $logger.info "  |- full command line to execute: "
+    $logger.info "    |- #{@full_jmeter_cmd}"
+
+  end
+
+  def run_test
+  	begin
+      prepare_jmeter_cmd
+      $logger.info "Starting Xvfb: Xvfb :10 -ac"
+      xvfb_pid=spawn("Xvfb :10 -ac")
+      $logger.info "Xvfb started with pid: #{xvfb_pid}"
+      $logger.info "Setting environment variable: export DISPLAY=:10"
+      #`export DISPLAY=:10`
+      $logger.info "Starting Jmeter test execution"
+      stdout, stderr, status=Open3.capture3("runuser tiger -c \'export DISPLAY=:10 && #{@full_jmeter_cmd}\'")
+      $logger.info "  |- status: #{status}"
+      $logger.info "  |- stdout: #{stdout}"
+      $logger.info "  |- stderr: #{stderr}"
+      copy_jmeter_gc_logs
+      generate_aggregated_report
+      copy_jmeter_artifacts
+
+      $logger.info "===== Jmeter.sh content ====="
+      $logger.info "#{jmeter_file_read}"
+      $logger.info "============================="
+    rescue Exception => e 
+    	$logger.info "Error: #{e}"
+    end
+  end
+
+  def jmeter_file_read
+    content = File.read("<%= node['jmeter_path']%>jmeter.sh")
+    return content
+  end
+  
+
+end

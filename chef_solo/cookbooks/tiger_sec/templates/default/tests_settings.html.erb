@@ -1,0 +1,9 @@
+<h2>Detailed test settings</h2>
+<table class="settings">
+  <tr><td>Solution name</td> <td> <%= "#{node['tiger_sec'][:full_sol_name]}" %></td></tr>
+<% node['tiger_sec']['test_attributes_hash'].each do |param_name,param_descr| %>
+  <% if (node['tiger_sec'][param_name] && node['tiger_sec'][param_name]!="") %>
+      <tr><td><%= param_descr %></td> <td><%= node['tiger_sec'][param_name] %></td></tr>
+  <% end %>
+<% end %>
+</table>

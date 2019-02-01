@@ -1,0 +1,250 @@
+class Tiger_nmap
+  require 'time'
+  require 'nmap/xml'
+  require 'yaml'
+
+  def initialize
+    $nmap_issues_count=0
+    $nmap_warnings_count = 0
+    @tests_cmd=''
+    $nmap_summary=''
+    @target_host='<%= node['tiger_sec']['target_host'] %>'.split('/')[0]
+    @target_port='<%= node['tiger_sec']['target_port'] %>'
+    @log_path='<%= node['tiger_sec']['node_logs_path'] %>'
+    @web_results_path='<%= node['tiger_sec']['web_results_path'] %>'
+    @nmap_cmd_params='<%= node['tiger_sec']['nmap_cmd_params'] %>'
+    @tests_type='<%= node['tiger_sec']['tests_type'] %>'
+    @exclusions_file_path='<%= node['tiger_sec']['nmap_exclusions_file_path'] %>'
+    @script_fail_warning_enabled='<%= node['tiger_sec']['script_fail_warning_enabled'] %>'
+    @permitted_ports='<%= node['tiger_sec']['permitted_ports'] %>'.split(' ')
+  end
+
+  def run_tests
+    @permitted_ports.push(@target_port.to_s + "/tcp")   # add target port to permitted
+    Dir.chdir('<%= node['tiger_sec']['node_logs_path'] %>')
+    @tests_cmd="#{@nmap_cmd_params} #{@target_host}"
+    $logger.info "Running #{@tests_cmd}"
+    `#{@tests_cmd} > #{@log_path}/nmap_console_output.txt 2>&1`
+    #system(@tests_cmd)
+    parse_log
+  end
+
+  def parse_log
+    $logger.info "Executing log parser"
+    output_not_vulnerable=true
+    script_failed=false
+
+    info_scripts=[
+      "ssl-date",
+      "http-mobileversion-checker",
+      "http-robots.txt",
+      "http-title",
+      "http-waf-detect",
+      "http-chrono",
+      "http-headers",
+      "http-comments-displayer",
+      "http-date"
+    ]
+
+    if (File.exist?(@exclusions_file_path))
+      $logger.info "Exclusions file #{@exclusions_file_path} has been found"
+      $logger.info "Exclusions file content:"
+      $logger.info "\n"+File.read(@exclusions_file_path)
+      exclusions=YAML.load_file(@exclusions_file_path)
+      $logger.info exclusions
+
+      if (exclusions[@tests_type]) # if exclusions has been defined for the test type, proceed with analysis
+        if (exclusions[@tests_type]['ports_scripts'].key?('info_scripts'))
+          excl_info_scripts=exclusions[@tests_type]['ports_scripts']['info_scripts'].split(' ')
+          $logger.info "Information scripts definition has been found for the #{@tests_type} test type: #{excl_info_scripts}"
+          info_scripts+=excl_info_scripts
+        end
+      else
+        exclusions={@tests_type =>{ "hosts_scripts" => {},"ports_scripts" => {} }}
+      end
+
+    else
+      $logger.info "Exclusions file #{@exclusions_file_path} was not found"
+      exclusions={@tests_type =>{ "hosts_scripts" => {},"ports_scripts" => {} }}
+    end
+
+
+    Nmap::XML.new('nmap_results.xml') do |xml|
+      xml.each_host do |host|
+        puts "[#{host.ip}]"
+        $logger.info "Analyzing Host: #{host}"
+
+        host.scripts.each do |name,output|
+        end
+
+        host.each_port do |port|
+          $logger.info "  |- Analyzing #{port}"
+
+
+          if (port.state == "filtered")
+            $logger.info "  |- Port state: \'filtered\'"
+            next
+          end
+
+          # checking version disclosure vulnerability
+          begin
+            if (port.service.version)
+              port_check = exclusions[@tests_type]['ports_scripts']
+              if (port_check.has_key?("#{port}")) && (port_check["#{port}"].has_key?("version_disclosure"))
+                $logger.info "  |- Possible version disclosure vulnerability has been identified on the port: #{port}"
+                $logger.info "  |- Corresponding exclusion was found for port #{port}, therefore information about version disclosure vulnerability will not be presented in the report"
+              else
+                $logger.warn "  |- Possible version disclosure vulnerability has been identified on the port: #{port}"
+                $logger.warn "  |- Logging the issue"
+                $issues_count+=1
+                $nmap_issues_count+=1
+
+                $nmap_summary+= <<-ISSUE
+                  <tr class="failed">
+                    <td>Nmap</td>
+                    <td>Version disclosure vulnerability has been indentified on the #{port} port: #{port.service.product} #{port.service.version}</td>
+                    <td><a href="#{@web_results_path}/logs/nmap_results.nmap">Nmap log file</a></td>
+                  </tr>
+                ISSUE
+
+              end
+            end
+          rescue Exception => e
+            $logger.error "Software version parsing on the port #{port} failed with error: #{e.message}"
+            $logger.error " |- Error backtrace: #{e.backtrace.inspect}"
+          end
+
+          # checking exclusions list
+          $logger.info "Checking exclusions for the #{@tests_type} test type"
+          if (exclusions[@tests_type]['ports_scripts'].has_key?("#{port}"))
+            exclusion_entry=exclusions[@tests_type]['ports_scripts']["#{port}"]
+            else
+              $logger.info "Can't find NSE exclusions for the port #{port}"
+              exclusion_entry={}
+            end
+          $logger.info "Port NSE exclusions: #{exclusion_entry}"
+
+
+          unless (@permitted_ports.include?("#{port}/tcp"))||(@permitted_ports.include?("#{port}/udp"))
+            $logger.warn "  |- Port was not found in the permitted ports list: #{@permitted_ports}"
+            $logger.warn "  |- Logging the issue"
+            $issues_count+=1
+            $nmap_issues_count+=1
+            $nmap_summary+= <<-ISSUE
+              <tr class="failed">
+                <td>Nmap</td>
+                <td>Additional non-filtered port was found: #{port}, state: #{port.state}, reason: #{port.reason}</td>
+                <td><a href="#{@web_results_path}/logs/nmap_results.nmap">Nmap log file</a></td>
+              </tr>
+              ISSUE
+          end
+
+          $logger.info "Parsing NSE scripts reports for the #{port} port"
+          port.scripts.each do |name,output|
+            script_failed=false
+            $logger.info "  |- Analyzing script: #{name}"
+            $logger.info "  |- Script output: #{output}"
+            output_not_vulnerable=false
+
+            if (name == 'http-sitemap-generator')
+              $logger.info "!!!!!! ANALYZING http-sitemap-generator  !!!!!!"
+              $logger.info "port.scripts          : #{port.scripts['http-sitemap-generator']}"
+            end
+
+
+            if (output =~ /ERROR: Script execution failed|FAILED:/)
+              $logger.warn "  |- Script execution has been failed"
+              $warnings_count+=1
+              $nmap_warnings_count += 1
+#              output_not_vulnerable=true
+              if (@script_fail_warning_enabled=='true')
+                $nmap_summary+= <<-ISSUE
+                  <tr class="warning">
+                    <td>Nmap</td>
+                    <td>NSE script #{name} failed on the #{port} port</td>
+                    <td><a href="#{@web_results_path}/logs/nmap_results.nmap">Nmap log file</a></td>
+                  </tr>
+                ISSUE
+              end
+              next
+            end
+
+            if (info_scripts.include?("#{name}"))
+              $logger.info "Script #{name} was found inthe info scripts array"
+              next
+            end
+
+            # checking internal excl. list
+            $logger.info "Checking internal non-vulnerable hash for the script #{name}"
+            not_vulnerable_hash=YAML.load_file('<%= node['tiger_sec']['scripts_path'] %>/not_vulnerable_hash.yml')
+
+            if (not_vulnerable_hash.has_key?("#{name}"))
+              $logger.info "Script name: #{name} has been found in the internal exclusions hash "
+              $logger.info "Comparing safe script output: #{not_vulnerable_hash[name].gsub(/\W/,'')}\n\n and current execution output: #{output.gsub(/\W/,'')}"
+              if (not_vulnerable_hash["#{name}"].gsub(/\W/,'') == output.gsub(/\W/,''))
+                $logger.info "Script #{name} output is equal to the non-vulnerable, defined in the internal hash"
+#                output_not_vulnerable=true
+                next
+              else
+                $logger.info "Internal non-vulnerable output is not equal to the script output. Proceeding with further steps"
+              end
+            end
+
+            # checking per project excl.
+            begin
+              if (exclusion_entry['warning'].has_key?("#{name}"))
+                $logger.info "Exclusion output has been found for the script #{name}: #{exclusion_entry['warning']["#{name}"]}"
+                $logger.info "Comparing excl. output: #{exclusion_entry['warning']["#{name}"].gsub(/\W/,'')} and script output: #{output.gsub(/\W/,'')}"
+                if (exclusion_entry['warning']["#{name}"].gsub(/\W/,'') == output.gsub(/\W/,''))
+                  $logger.info "Exclusion output is equal to the script output"
+                else
+                  $logger.info "The script output is differing than in the exclusions list. Adding the warning to the report"
+                  $nmap_warnings_count+=1
+                  $nmap_summary+= <<-WARNING
+                    <tr class="warning">
+                      <td>Nmap</td>
+                      <td>#{name} informational NSE script output has been changed on the #{port} port</td>
+                      <td><a href="#{@web_results_path}/logs/nmap_results.nmap">Nmap log file</a></td>
+                    </tr>
+                  WARNING
+                end
+                next
+              end
+            rescue Exception => e
+              $logger.error "Project specific exclusions with WARNING severity failed with error: #{e.message}"
+              $logger.error " |- Error backtrace: #{e.backtrace.inspect}"
+            end
+
+            begin
+              if (exclusion_entry.has_key?("alert"))&&(exclusion_entry['alert'].has_key?("#{name}"))
+                $logger.info "Exclusion output has been found for the script #{name}: #{exclusion_entry['alert']["#{name}"]}"
+                $logger.info "Comparing excl. output: #{exclusion_entry['alert']["#{name}"].gsub(/\W/,'')} and script output: #{output.gsub(/\W/,'')}"
+                if (exclusion_entry['alert']["#{name}"].gsub(/\W/,'') == output.gsub(/\W/,''))
+                  $logger.info "Exclusion output is equal to the script output"
+                  next
+                end
+              end
+            rescue Exception => e
+              $logger.error "Project specific exclusions with ALERT severity failed with error: #{e.message}"
+              $logger.error " |- Error backtrace: #{e.backtrace.inspect}"
+            end
+
+            # no previous checks were successfull
+            $logger.warn "  |- Logging the issue"
+            $issues_count+=1
+            $nmap_issues_count+=1
+
+            $nmap_summary+= <<-ISSUE
+              <tr class="failed">
+                <td>Nmap</td>
+                <td>NSE script #{name} found vulnerability on the #{port} port</td>
+                <td><a href="#{@web_results_path}/logs/nmap_results.nmap">Nmap log file</a></td>
+              </tr>
+            ISSUE
+
+          end
+        end
+      end
+    end
+  end
+end

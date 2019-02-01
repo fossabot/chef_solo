@@ -1,0 +1,3 @@
+Host git.
+  StrictHostKeyChecking no
+  IdentityFile /home/tiger/.ssh/id_rsa

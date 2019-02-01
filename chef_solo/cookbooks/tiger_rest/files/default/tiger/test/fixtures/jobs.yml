@@ -1,0 +1,23 @@
+# Read about fixtures at http://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  testID: 1
+  DockerHostID: MyText
+  sid: MyText
+  created_at: 2017-03-25 18:43:28
+  updated_at: 2017-03-25 18:43:28
+  result: MyText
+  details: MyText
+  tags: MyText
+  links: MyText
+
+two:
+  testID: 1
+  DockerHostID: MyText
+  sid: MyText
+  created_at: 2017-03-25 18:43:28
+  updated_at: 2017-03-25 18:43:28
+  result: MyText
+  details: MyText
+  tags: MyText
+  links: MyText

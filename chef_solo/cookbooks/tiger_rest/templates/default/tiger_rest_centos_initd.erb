@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# tiger_rest    
+#
+# chkconfig: 345 70 30
+# 
+# processname: tiger_rest
+
+# Source function library.
+. /etc/init.d/functions
+
+prog="tiger_rest"
+LOCKFILE=/var/lock/subsys/$prog
+PID=$(ps aux | grep puma | grep -v grep | awk '{print $2}')
+
+start() {
+        echo -n "Starting $prog: "
+        cd <%= node['tiger_rest']['apps_path'] %>/tiger && \
+        /usr/local/bin/bundle exec <%= node['tiger_rest']['apps_path'] %>/tiger/bin/rails server -b 0.0.0.0 -p 3100 >> /var/log/tiger_rest.log 2>&1 &
+        RETVAL=$?
+        [ $RETVAL -eq 0 ] && touch $LOCKFILE
+        echo
+        return $RETVAL
+}
+
+stop() {
+        echo -n "Shutting down $prog: "
+        kill $PID
+        RETVAL=$?
+        [ $RETVAL -eq 0 ] && rm -f $LOCKFILE
+        echo
+        return $RETVAL
+}
+
+status() {
+        echo -n "Checking $prog status: "
+        if [ "$PID" -ne 0 ]; then
+          echo "$prog with PID $PID is running."
+        else
+          echo "$prog is not running."
+          exit 1
+        fi
+        RETVAL=$?
+        return $RETVAL
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    *)
+        echo "Usage: $prog {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
+exit $RETVAL

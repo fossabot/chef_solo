@@ -1,0 +1,21 @@
+FROM nail_vnc
+
+MAINTAINER EPM-TIGER
+
+USER root
+
+RUN mkdir -p /opt/tiger
+RUN mkdir -p <%= node['tiger_common']['software_path'] %>
+
+COPY ./software <%= node['tiger_common']['software_path'] %>
+COPY ./epm-tigr /opt/tiger/epm-tigr
+COPY ./jsons/docker_image.json /opt/tiger/epm-tigr/docker_image.json
+
+
+RUN apt-get update && apt-get install -y curl vim mc git ntp \
+    && curl -k -LO https://packages.chef.io/files/stable/chefdk/2.0.28/ubuntu/16.04/chefdk_2.0.28-1_amd64.deb \
+    && dpkg -i chefdk_2.0.28-1_amd64.deb \
+    && rm chefdk_2.0.28-1_amd64.deb \
+    && rm -rf /var/lib/apt/lists/* 
+RUN cd /opt/tiger/epm-tigr/chef_solo/cookbooks/tiger_common && berks vendor /opt/tiger/epm-tigr/chef_solo/cookbooks
+RUN cd /opt/tiger/epm-tigr/chef_solo && chef-client -z -j /opt/tiger/epm-tigr/docker_image.json

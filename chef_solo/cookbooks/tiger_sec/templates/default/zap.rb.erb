@@ -1,0 +1,117 @@
+class Zap
+
+	def initialize
+		$zap_issues_count = 0
+    $zap_warnings_count = 0
+    $zap_summary = ''
+    @target_host = "<%= node['tiger_sec']['target_host'] %>"
+    @target_port = "<%= node['tiger_sec']['target_port'] %>"
+    @log_path      = "<%= node['tiger_sec']['node_logs_path'] %>/zap_log.txt"
+    @target_protocol = "<%= node['tiger_sec']['protocol'] %>"
+    @web_results_path = "<%= node['tiger_sec']['web_results_path'] %>"
+    @zap_cmd_params   = "<%= node['tiger_sec']['zap_cmd_params'] %>"
+    @software_path    = "<%= node['tiger_common']['software_path'] %>"
+    @exclusions_file_path  = "<%= node['tiger_sec']['zap_exclusions_file_path'] %>"
+
+    @zap_user = "<%= node['tiger_sec']['zap_user'] %>"
+    @zap_context = "<%= node['tiger_sec']['zap_context'] %>"
+    @zap_context_file_path = "<%= node['tiger_sec']['zap_context_path'] %>"
+	end
+
+
+  def run_tests
+    $logger.info 'Starting ZAP ...'
+    target_url = "#{@target_protocol}://#{@target_host}"
+    target_url += ":#{@target_port}" if @target_port != ""
+    `zap-cli --zap-path #{@software_path}/ZAP_2.7.0/ -p 8090 start -o '-config api.disablekey=true' >> #{@log_path}`
+    if ( @zap_context_file_path != "" )
+      $logger.info "Authentication enabled. Scanning #{target_url}"
+      `zap-cli context import #{@zap_context_file_path} >> #{@log_path}`
+      `zap-cli quick-scan #{@zap_cmd_params} -c "#{@zap_context}" -u "#{@zap_user}" #{target_url} -l Informational >> #{@log_path}`
+    else
+		$logger.info "Started without authentication. Scanning #{target_url}"
+			if ["80", "443"].include? "#{@target_port}"
+				 `zap-cli quick-scan #{@zap_cmd_params} #{@target_protocol}://#{@target_host} -l Informational >> #{@log_path}`
+			else
+				 `zap-cli quick-scan #{@zap_cmd_params} #{target_url} -l Informational >> #{@log_path}`
+			end
+    end
+    $logger.info 'Zap finished ...'
+    output_vulnerability
+  end
+
+  def parse_log(log_file)
+  	errors = Array.new
+
+		File.open(log_file).each do |line|
+		  error = Hash.new
+		  if line =~ /^[|].*/
+		  	error[:problem] = line.split("|")[1].strip
+		  	error[:severity] = line.split("|")[2].strip
+		  	error[:id] = line.split("|")[3].strip
+		  	error[:url] = line.split("|")[4].strip
+		  	errors << error
+		  end
+		end
+
+		return errors.drop(1) # delete first element with name of columns
+  end
+
+  def parse_excl_YAML(path)
+    yaml_hash = YAML.load_file(path)
+    return yaml_hash
+  end
+
+	def output_vulnerability
+		issues = parse_log(@log_path)
+
+		# Check exlusions list.Delete an issue if it identical with exclusion and doesn't have 'visible' flag
+		if ( File.exist?(@exclusions_file_path) )
+      exclusion = parse_excl_YAML(@exclusions_file_path)
+      issues.each do |issue|
+        if exclusion['warning'].has_key?(issue[:problem])
+          if exclusion['warning'][issue[:problem]].has_key?('visible')
+          	$logger.info "#{issue[:problem]} has 'visible' key"
+            issue[:severity] = 'Warning'
+          elsif exclusion['warning'][issue[:problem]]['path'].include? issue[:url]
+            $logger.info " #{issue[:problem]} with #{issue[:url]} is an exclusion"
+            issue[:severity] = 'Information'
+          end
+        end
+      end
+    end
+
+    # Delete issues with severity "Information"
+    issues.delete_if {|el| el[:severity] == 'Information' }
+
+    # Create output for HTML report depending on severity
+    issues.each do |issue|
+      if ['Warning'].include? issue[:severity]
+        $zap_summary += <<-SUMMARY
+          <tr class="warning">
+            <td>ZAP proxy</td>
+            <td><b>#{issue[:problem]}</b>. Affected path: #{issue[:url]}</td>
+            <td>
+              <a href="#{@web_results_path}/logs/zap_log.txt">ZAP report</a>
+            </td>
+          </tr>
+        SUMMARY
+        $zap_warnings_count += 1
+        $warnings_count += 1
+      else
+        $zap_summary += <<-SUMMARY
+          <tr class="failed">
+            <td>Zap proxy</td>
+            <td><b>#{issue[:problem]}</b>. Affected path: #{issue[:url]}</td>
+            <td>
+              <a href="#{@web_results_path}/logs/zap_log.txt">ZAP report</a>
+            </td>
+          </tr>
+        SUMMARY
+        $zap_issues_count += 1
+      end
+		end
+		$issues_count += $zap_issues_count
+		$logger.info "ZAP analysis finished"
+	end
+end

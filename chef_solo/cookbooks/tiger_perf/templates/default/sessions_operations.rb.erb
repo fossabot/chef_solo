@@ -1,0 +1,36 @@
+require 'fileutils'
+require 'yaml'
+
+def check_session_file_parameter(main_config_yml_path)
+  jmeter_conf = YAML.load_file(File.dirname(main_config_yml_path) + "/jmeter/#{$test_type}.yml")
+  if jmeter_conf['jmeter']['session_files'] 
+    session_file_list = jmeter_conf['jmeter']['session_files'].split(',')
+    session_file_list.map! {|file| $repo_data_files + "/" + file}
+    session_files_separation($lg_count,$lg_number,session_file_list)
+  else
+    $logger.info "Sessions files are not specified"
+  end
+end
+
+def session_files_separation(total_lg_amount,lg_num,file_list)
+  file_list.each do |file|
+      lines_in_file = File.foreach(file).count
+      next if lines_in_file < 1 # Do not divide a file if number of lines in a file less then 1
+      num_strings_for_lg = lines_in_file/total_lg_amount.to_i
+      next if num_strings_for_lg < 1 # Do not divide a file if number of lines for each LG less then 1
+      additional_strings_for_last_lg = lines_in_file%total_lg_amount.to_i
+      
+      file_content = File.readlines(file)
+  
+      for i in 1...lg_num.to_i
+        file_content.shift(num_strings_for_lg)
+      end
+      File.open(file, 'w') {|new_file| new_file.puts file_content[0...num_strings_for_lg]}
+      
+      # if LG is the last one and we have extra strings, then will add them to the last LG
+      if ( additional_strings_for_last_lg != 0 ) && (lg_num.to_i == total_lg_amount.to_i)
+        file_content.shift(num_strings_for_lg)
+        File.open(file, 'a') {|new_file| new_file.puts file_content}
+      end
+  end
+end

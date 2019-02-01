@@ -1,0 +1,179 @@
+class JobController < ApplicationController
+
+  before_filter :check_sign, only: [:create]
+  skip_before_filter :verify_authenticity_token, only: [:create,:check,:update]
+
+  require 'json'
+  require 'openssl'
+  require 'base64'
+  require 'socket'
+  require 'timeout'
+
+  include JobHelper
+
+  def check_sign
+    pub_key=OpenSSL::PKey::RSA.new File.read "<%= node['tiger_rest']['cert_path'] %>/#{params[:tags][:project_id].downcase}.public_key.pem"
+    digest = OpenSSL::Digest::SHA256.new
+    data_to_check_json=JSON.parse(request.body.read)
+    signature=Base64.decode64(data_to_check_json['signature'])
+    data_to_check_json.delete('signature')
+
+    if pub_key.verify digest, signature, data_to_check_json.to_s
+      puts 'Valid'
+    else
+      puts 'Invalid'
+      render nothing: true, status: :unauthorized
+    end
+  end
+
+  def create
+
+    job_params=Hash.new
+    job_params[:testID]=params[:testID]
+    job_params[:sid]=params[:sid]
+    job_params[:created_at]=Time.now #params[:created_at]
+    job_params[:updated_at]='' #params[:updated_at]
+    job_params[:details]=''
+    job_params[:result]='executing' # params[:result]
+
+    docker_host_tests_path='<%= node['tiger_rest']['docker_test_path'] %>'
+    rest_tests_path='<%= node['tiger_rest']['tests_path'] %>'
+
+    tags_str=""
+
+    params[:tags].each do |tag,value|
+      tags_str+="#{tag}= #{value} \n"
+    end
+
+    job_params[:tags]=tags_str
+
+    Dir.mkdir("#{rest_tests_path}/#{params[:testID]}") unless File.exists?("#{rest_tests_path}/#{params[:testID]}")
+
+    docker_image = "<%= node['tiger_rest']['prod_docker_image'] %>"
+    run_script_name='run_test.rb'
+    case params[:tags][:tiger_env_type]
+      when "prod"
+        run_script_name='run_tiger_tests.rb'
+      else
+        run_script_name='run_tiger_tests_dev.rb'
+    end
+
+    jobs=''
+    containers_ids=''
+    dh_array_id=0
+    docker_hosts=''
+
+    for i in 1..params[:tags][:lg_count].to_i
+
+      job_params[:DockerHostID]=get_dh_id(params[:tags],dh_array_id)
+      logger.info "Scheduling container with sequential number #{i} on #{job_params[:DockerHostID]} docker host"
+      docker_hosts+=" #{job_params[:DockerHostID]}"
+      dh_array_id+=1
+      dh_array_id=0 if dh_array_id == Rails.configuration.docker_hosts.count
+
+      @job=Job.new(job_params)
+      @job.save
+      dna=Hash.new
+      dna['secret_for_influxdb'] = 'egklrDvbYg/iu+dz'
+      dna["secret"]  = ''
+      dna["lc_fqdn"] = params[:tags][:rest_api_server]
+      dna["lc_ip"]   = Rails.configuration.lc_ip
+      dna["container_name"] = "nail-#{i}"
+      dna["rest_api_fqdn"]  = Rails.configuration.rest_api_fqdn
+      dna["DockerHostID"]   = job_params[:DockerHostID]
+      params[:tags][:lg_number] = i
+      dna["tags"] = params[:tags]
+      dna["job_id"] = @job[:id]
+      temp_dna_str  = dna.to_json
+      temp_dna      = JSON.parse(temp_dna_str)
+
+      jobs+=@job[:id].to_s+" "
+
+      # Check if docker_host port is open
+      def is_port_open?(ip, port)
+        begin
+          Timeout::timeout(1) do
+            begin
+              s = TCPSocket.new(ip, port)
+              s.close
+               return true
+            rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
+              return false
+            end
+          end
+        rescue Timeout::Error
+        end
+        return false
+      end
+
+      port = rand(6901..7200)
+      while is_port_open?(job_params[:DockerHostID],port)
+        p "#{port} is opened . Trying a new port "
+        port = rand(6901..7200)
+      end
+
+      case  dna["tags"]["tiger_tests_type"]
+        when "security"
+          tests_cmd="docker run -d -v #{docker_host_tests_path}:#{rest_tests_path} -p #{port}:6901 -e VNC_PW=a32VNC --device=/dev/net/tun --privileged -m 1000M --cpuset-cpus 0 "
+          tests_cmd+="#{docker_image} /bin/bash -c \"service collectd start;"
+          tests_cmd+="echo \'<%= node['ipaddress'] %>  <%= node['tiger_web']['URL'] %>\' >> /etc/hosts;"
+          tests_cmd+="cp -f #{rest_tests_path}/#{params[:testID]}/dna_#{i}.json /opt/tiger/epm-tigr/chef_solo;"
+          tests_cmd+="cp -f #{rest_tests_path}/#{run_script_name} /opt/tiger/epm-tigr/chef_solo;"
+          tests_cmd+="ruby /opt/tiger/epm-tigr/chef_solo/#{run_script_name} #{i} sec\""
+        when "performance"
+          tests_cmd="docker run -d -v #{docker_host_tests_path}:#{rest_tests_path} -p #{port}:6901 -e VNC_PW=a32VNC --device=/dev/net/tun --privileged -m 1000M --cpuset-cpus 0 "
+          tests_cmd+="--hostname=\"#{dna["container_name"]}\" "
+          tests_cmd+="#{docker_image} /bin/bash -c \"service collectd start;"
+          tests_cmd+="service ntp restart;"
+          tests_cmd+="echo \'<%= node['ipaddress'] %>  <%= node['tiger_web']['URL'] %>\' >> /etc/hosts;"
+          tests_cmd+="cp -f #{rest_tests_path}/#{params[:testID]}/dna_#{i}.json /opt/tiger/epm-tigr/chef_solo;"
+          tests_cmd+="cp -f #{rest_tests_path}/#{run_script_name} /opt/tiger/epm-tigr/chef_solo;"
+          tests_cmd+="ruby /opt/tiger/epm-tigr/chef_solo/#{run_script_name} #{i} perf\""
+      end
+      tests_cmd+="\ndocker rm -v $(docker ps -a -q -f status=exited) > /dev/nul &"
+      tests_cmd+="\ndocker rm -v $(docker ps -a -q -f status=dead) > /dev/nul &"
+      File.write("#{rest_tests_path}/#{params[:testID]}/run_container_#{i}.sh",tests_cmd)
+      File.write("#{rest_tests_path}/#{params[:testID]}/dna_#{i}.json",JSON.pretty_generate(temp_dna,:indent => "  "))
+#      File.write("/opt/tiger/docker/tiger_image/tests/#{params[:testID]}/run_container_#{i}.sh",tests_cmd)
+      `chown -R tiger #{rest_tests_path}/#{params[:testID]}`
+      logger.info "Copying files to the Docker host: scp -r -o \"StrictHostKeyChecking no\" -i /home/tiger/.ssh/id_rsa #{rest_tests_path}/#{params[:testID]} tiger@#{job_params[:DockerHostID]}: #{docker_host_tests_path}"
+      `scp -r -o \"StrictHostKeyChecking no\" -i /home/tiger/.ssh/id_rsa #{rest_tests_path}/#{params[:testID]} tiger@#{job_params[:DockerHostID]}:#{docker_host_tests_path}`
+      logger.info "Executing: ssh -i /home/tiger/.ssh/id_rsa -o \"StrictHostKeyChecking no\" tiger@#{job_params[:DockerHostID]} \"sudo bash #{docker_host_tests_path}/#{params[:testID]}/run_container_#{i}.sh\""
+      tests_automation_res = `ssh -i /home/tiger/.ssh/id_rsa -o \"StrictHostKeyChecking no\" tiger@#{job_params[:DockerHostID]} \"sudo bash #{docker_host_tests_path}/#{params[:testID]}/run_container_#{i}.sh\"`
+      containers_ids+= tests_automation_res.split("\n")[0]+" "
+
+    end
+
+    jobs.chop!
+    response_json={}
+    response_json["jobs"]=jobs
+    response_json["docker host"]=docker_hosts #job_params[:DockerHostID]
+    response_json["test id"]=params[:testID]
+    response_json['noVNC access URL'] = "http://#{job_params[:DockerHostID]}:#{port}"
+    response_json["containers ids"]=containers_ids
+    render :json => response_json
+  end
+
+  def check
+    @job = Job.find(params[:id])
+    render json: @job
+  end
+
+  def update
+    job_params={}
+    @job= Job.find(params[:id])
+    job_params[:sid]=@job.sid
+    job_params[:testID]=@job.testID
+    job_params[:result]=params[:result]
+    job_params[:updated_at]=Time.now
+    job_params[:details]=params[:details]
+    # @job.result=params[:result]
+    @job.update(job_params)
+    render json: @job
+  end
+
+  def list
+    @jobs=Job.last(5).reverse!
+    @docker_hosts=Rails.configuration.docker_hosts
+  end
+end

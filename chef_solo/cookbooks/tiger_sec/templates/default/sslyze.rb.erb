@@ -1,0 +1,40 @@
+class Sslyze
+  require 'json'
+  require 'time'
+  require 'yaml'
+
+  def initialize    
+    $sslyze_issues_count = 0
+    $sslyze_warnings_count =0
+    @tests_cmd=''
+    $sslyze_summary=''
+    @target_host='<%= node['tiger_sec']['target_host'] %>'.split('/')[0]
+    @target_port='<%= node['tiger_sec']['target_port'] %>'
+    @log_path='<%= node['tiger_sec']['node_logs_path'] %>/sslyze_tests.txt'
+    @exclusions_path = '<%= node['tiger_sec']['sslyze_exclusions_file_path'] %>'
+    @web_results_path='<%= node['tiger_sec']['web_results_path'] %>'
+  end
+
+  def run_tests
+    @tests_cmd="sslyze --regular #{@target_host}:#{@target_port} > #{@log_path} 2>&1"    
+    $logger.info "Running sslyze --regular #{@target_host}:#{@target_port}"
+    system(@tests_cmd)
+
+    parse_log
+  end
+
+  def parse_log
+    exclusions = YAML.load_file(@exclusions_path) if File.exist?(@exclusions_path)
+    IO.readlines(@log_path).each do |line|
+      if (line=~/FOUND|VULNERABLE|FAILED/)
+        if (line =~ /CA Store/)
+          next if exclusions && exclusions['self-signed'] == true  
+        end                  
+        $issues_count+=1
+        $sslyze_issues_count+=1
+        $sslyze_summary+="<tr class=\"failed\"><td>SSLyze tests</td> <td>#{line}</td> <td><a href=\"#{@web_results_path}/logs/sslyze_tests.txt\">SSLyze log file</a></td></tr> \n"
+      end
+    end
+    $logger.info "  | -- Self-signed certificate is enabled" if exclusions && exclusions['self-signed'] == true
+  end
+end

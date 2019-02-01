@@ -1,0 +1,14 @@
+class Encr
+  require 'openssl'
+  require 'base64'
+  def sign (hash_to_sign)
+    pass_phrase='<%= node['tiger_sec']['cert_psw'] %>'
+    priv_pem=File.read '<%= "#{node['tiger_sec']['scripts_path']}/certs/#{node['tiger_sec']['project_id'].downcase}.private.secure.pem" %>'
+    priv_key=OpenSSL::PKey::RSA.new priv_pem, pass_phrase
+    digest = OpenSSL::Digest::SHA256.new
+    signature = priv_key.sign digest, hash_to_sign.to_s
+    signature_base64=Base64.encode64(signature)
+#    puts signature_base64
+    return signature_base64
+  end 
+end

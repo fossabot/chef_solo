@@ -1,0 +1,79 @@
+Listen 443
+
+ServerTokens ProductOnly
+ServerSignature Off
+
+# Optionally load the module:
+LoadModule headers_module modules/mod_headers.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule ssl_module modules/mod_ssl.so
+
+
+<IfModule mod_ssl.c>
+  <VirtualHost _default_:443>
+    ServerAdmin 
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubdomains;"
+    # AllowOverride All
+    # Order allow,deny
+    # allow from all
+
+    DocumentRoot <%= node['tiger_web']['root_path'] %>/site
+
+    <Directory <%= node['tiger_web']['root_path'] %>/site/results/security>
+      AuthType Basic
+      AuthName "Restricted TIGER project files"
+      AuthBasicProvider file
+      AuthUserFile "/etc/<%= node['web-serv'] %>/.htpasswd"
+      Require user user01
+    </Directory>
+
+    <Directory <%= node['tiger_web']['root_path'] %>/site/results/performance>
+      AuthType Basic
+      AuthName "Restricted TIGER project files"
+      AuthBasicProvider file
+      AuthUserFile "/etc/<%= node['web-serv'] %>/.htpasswd"
+      Require user user01
+    </Directory>
+
+    <Directory <%= node['tiger_web']['site_path'] %>>
+      HeaderName /markup/header.html
+      ReadmeName /markup/footer.html
+      Options Indexes FollowSymLinks MultiViews
+      IndexOptions FancyIndexing SuppressDescription SuppressHTMLPreamble NameWidth=* DescriptionWidth=*
+      IndexIgnore sso apaxy markup graph
+      IndexStyleSheet /css/autoindex.css
+      AddAlt Compressed *.gz *.zip
+    </Directory>
+
+    ErrorLog <%= node['tiger_web']['log_path'] %>/ssl_error.log
+    # CustomLog /var/log/apache2/tiger/ssl_info.log
+
+    SSLEngine on
+    SSLCertificateFile      <%= node['tiger_web']['root_path'] %>/ssl/certs/<%= node['tiger_web']['URL'] %>.cer
+    SSLCertificateKeyFile   <%= node['tiger_web']['root_path'] %>/ssl/certs/<%= node['tiger_web']['URL'] %>.key
+
+
+
+    <FilesMatch "\.(cgi|shtml|phtml|php)$">
+      SSLOptions +StdEnvVars
+    </FilesMatch>
+    <Directory /usr/lib/cgi-bin>
+      SSLOptions +StdEnvVars
+    </Directory>
+
+
+    ProxyPreserveHost On
+    ProxyPass "/job" "http://localhost:3100/job" connectiontimeout=60 timeout=80
+    ProxyPassReverse "/job" "http://localhost:3100/job"
+
+    ##### Grafana #####
+    ProxyPass /grafana http://localhost:3000 connectiontimeout=300 timeout=320
+    ProxyPassReverse /grafana http://localhost:3000
+
+    ##### Kibana #####
+    ProxyRequests On
+    ProxyPass /kibana http://localhost:5601
+    ProxyPassReverse /kibana http://localhost:5601
+  </VirtualHost>
+</IfModule>

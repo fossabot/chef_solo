@@ -1,0 +1,108 @@
+<html>
+<head>
+    <title>TIGER installation</title>
+		<style type="text/css">
+				body {
+					font: 85% verdana,arial,helvetica;
+					font-size: 125%;
+					color:#000000;
+				}
+				body_bold {
+					font:bold 85% verdana,arial,helvetica;
+					color:#000000;
+				}
+			h3 {margin-bottom: 0.5em; font: bold 115% verdana,arial,helvetica; color: #0088cc;}
+			h4 {margin-bottom: 0.5em; font: bold 100% verdana,arial,helvetica;}
+			h4_inline {margin-bottom: 0.5em; font: bold 100% verdana,arial,helvetica; display: inline;}
+			h4_body_inline {margin-bottom: 0.5em; font: 100% verdana,arial,helvetica; display: inline;}
+			h5 {margin-bottom: 0em; font: 100% bold 75% verdana,arial,helvetica}
+			h5_inline {margin-bottom: 0.5em; font: bold 75% verdana,arial,helvetica;display: inline;}
+			h5_body_inline {margin-bottom: 0.5em; font: 75% verdana,arial,helvetica;display: inline;}
+			a {font: arial;
+			  }
+			a:visited {
+			    color: #008080;
+			    }
+			a:link {
+			    color: #008080;
+			    }
+			a:hover {
+			    color: #00334d;
+			    }
+
+				table tr td, table tr th {
+					font-size: 125%;
+					padding: 10px;
+				}
+				table.details tr th{
+					color: #ffffff;
+					font-weight: bold;
+					text-align:center;
+					background:#2674a6;
+					white-space: nowrap;
+				}
+				table.details tr td{
+					background:#eeeee0;
+					white-space: nowrap;
+				}
+				table.details tr.red td{
+					background: #FF3333;
+				}
+				table.details tr.yellow td{
+					background:yellow;
+				}
+			.trOverridenClass { font-weight: bold; font-style: italic;vertical-align:middle;}
+		</style>
+
+  </head>
+<body>
+
+<br>
+<h3 align="center" color="#0088cc">TIGER: continuous testing service</h3>
+
+<table align="center">
+  <tr>
+    <td></td>
+    <td><a href="http://<%= node['ipaddress'] %>/jmt/results"><h5>Performance tests results</h5></a></td>
+    <td><a href="http://<%= node['ipaddress'] %>/sec/results"><h5>Security tests results</h5></a></td>
+    <td><a href="http://<%= node['ipaddress'] %>:8080"><h5>Jenkins</h5></a></td>
+    <td><a href="http://<%= node['ipaddress'] %>:3000"><h5>Grafana Web Interface</h5></a></td>
+    <td><a href="http://<%= node['ipaddress'] %>:8083"><h5>InfluxDB Web Interface</h5></a></td>
+    <td><a href="http://<%= node['ipaddress'] %>:3100/schedule/list"><h5>Tasks statuses</h5></a></td>
+  </tr>
+  <tr><td></td></tr>
+</table>
+  <p style="font-size:110%;color:#3399ff;" align="center">Follow instuctions below to install <b>TIGER build agent part</b> to your server or workstation</p>
+<table align="center" style="font-size:11;border: 1px solid black;">
+<br>
+  <tr bgcolor="#6699cc">
+    <td>Platform</td>
+    <td>Package link</td>
+    <td>Installation istructions</td>
+  </tr>
+  <tr>
+    <td>Windows x64</td>
+    <td><a href="http://<%= node['ipaddress'] %>/installations/TIGER_portable_windows_x64.zip">Windows x64 based systems installation</a></td>
+    <td>
+      <ol>
+        <li>Download package</li>
+        <li>Extract archhive</li>
+        <li>Execute <b>run_tests.bat</b> file inside of the extracted archive to get internal tests results or modify it accordingly to your needs</li>
+      </ol>
+    </td>
+  </tr>
+  <tr>
+    <td>Linux</td>
+    <td><a href="http://<%= node['ipaddress'] %>/installations/TIGER_portable_Linux.zip">Linux based systems installation</a></td>
+    <td>
+      <ol>
+        <li>Download package</li>
+        <li>Extract archhive</li>
+        <li>Install ruby interpreter. <a href="https://www.ruby-lang.org/en/documentation/installation/">Ruby installation manual</h5></a></li>
+        <li>Execute <b>bash run_tests.sh</b> command inside of the extracted archive to get internal tests results or modify it accordingly to your needs</li>
+      </ol>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

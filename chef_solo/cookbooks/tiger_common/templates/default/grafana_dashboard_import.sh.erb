@@ -1,0 +1,8 @@
+#!/bin/bash
+sleep 5
+
+curl -k -XPOST -i https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/dashboards/db --data-binary @./jmeter_load_test.json -H "Content-Type: application/json"
+curl -k -XPOST -i https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/dashboards/db --data-binary @./jmeter_compare_results.json -H "Content-Type: application/json"
+curl -k -XPOST -i https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/dashboards/db --data-binary @./system_stat.json -H "Content-Type: application/json"
+curl -k -XPOST -i https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/dashboards/db --data-binary @./target_host_stat.json -H "Content-Type: application/json"
+curl -k -XPOST -i https://<%= node['chef-grafana']['config']['security']['admin_user'] %>:<%= node['chef-grafana']['config']['security']['admin_password'] %>@127.0.0.1/grafana/api/dashboards/db --data-binary @./security_test.json -H "Content-Type: application/json"

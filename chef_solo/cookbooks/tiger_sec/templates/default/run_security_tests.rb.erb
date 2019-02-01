@@ -1,0 +1,190 @@
+
+require 'json'
+require 'time'
+require 'logger'
+require_relative 'sslyze.rb'
+require_relative 'nmap.rb'
+require_relative 'nikto.rb'
+require_relative 'burp.rb'
+require_relative 'w3af.rb'
+require_relative 'html_helper.rb'
+require_relative 'html_report_helper.rb'
+require_relative 'masscan.rb'
+require_relative 'zap.rb'
+require_relative 'influx.rb'
+require_relative 'qualys.rb'
+
+
+$tests_type='<%= node["tiger_sec"]["tests_type"] %>'
+$current_build_number='<%= node["tiger_sec"]["build_number"] %>'
+$project_id='<%= node['tiger_sec']['project_id'] %>'
+$full_sol_name='<%= node['tiger_sec']['full_sol_name'] %>'
+$full_sol_path='<%= node['tiger_sec']['full_sol_path'] %>'
+$lc_ip='<%= node['lc_ip'] %>'
+$lc_fqdn='<%= node['lc_fqdn'] %>'
+$rest_port=443
+$env_type='<%= node['tiger_sec']['env_type'] %>'
+$test_id='<%= node['tiger_sec']['test_id'] %>'
+$build_started='<%= node['tiger_sec']['build_started'] %>'
+$lg_fqdn='<%= node['fqdn'] %>'
+$lc_results_path='<%= node['tiger_sec']['lc_results_path'] %>'
+$node_results_path='<%= node['tiger_sec']['node_results_path'] %>'
+$logger=Logger.new("#{$node_results_path}/logs/tests_execution_log.txt")
+    $logger.info "Repo name :  Branch: <%= node['tiger_sec']['tiger_env_type'] %>"
+    $logger.info "node_results_path: #{$node_results_path}"
+    $logger.info "lc_results_path: #{$lc_results_path}"
+$target_host='<%= node['tiger_sec']['target_host'] %>'
+$target_port='<%= node['tiger_sec']['target_port'] %>'
+container_deletion_delay='<%= node['tiger_sec']['container_deletion_delay'] %>'
+$issues_count=0
+$warnings_count=0
+tests_started=Time.now
+
+results_hash={}
+results_hash['id']='<%= node['job_id'] %>'
+
+web_results_path = '<%= node['tiger_sec']['web_results_path'] %>'
+nmap_cmd_params = '<%= node['tiger_sec']['nmap_cmd_params'] %>'
+nikto_cmd_params = '<%= node['tiger_sec']['nikto_cmd_params'] %>'
+burp_cmd_params = "<%= node['tiger_sec']['burp_cmd_params'] %>"
+w3af_config_file = '<%= node['tiger_sec']['w3af_file_name'] %>'
+zap_cmd_params = '<%= node['tiger_sec']['zap_cmd_params'] %>'
+qualys_profile_id = '<%= node['tiger_sec']['qualys_profile_id'] %>'
+qualys_template_id = '<%= node['tiger_sec']['qualys_template_id'] %>'
+
+<% if (node['tiger_sec']['vpn_id']) %>
+  vpn_id='<%= node['tiger_sec']['vpn_id'] %>'
+  vpn_files_path='<%= node['tiger_sec']['vpn_files_path'] %>'
+  vpn_config_file_path="#{vpn_files_path}/<%= node['tiger_sec']['vpn']['config_file_name'] %>"
+  creds_file_path="#{vpn_files_path}/<%= node['tiger_sec']['vpn']['creds_file_name'] %>"
+<% else %>
+  vpn_id=''
+<%end%>
+dns_servers='<%= node['tiger_sec']['dns'] %>'
+resolv_conf_entry=''
+$vpn_pid=0
+
+
+if (dns_servers!='')
+  dns_servers.split(',').each do |server|
+    resolv_conf_entry+="nameserver #{server}\n"
+  end
+  IO.write('/etc/resolv.conf',resolv_conf_entry,mode: 'a')
+end
+
+if (vpn_id !='')
+  Dir.chdir(vpn_files_path)
+
+  `openvpn --config #{vpn_config_file_path} --auth-nocache --auth-user-pass #{creds_file_path} --daemon`
+  sleep(20)
+  `curl -vv --connect-timeout 30 #{$target_host}:#{$target_port}` # checking vpn connection and releasing script for further tests execution
+end
+
+data_for_influx=Array.new # Array of tools with count of issues and warnings
+
+sslyze=Sslyze.new
+sslyze.run_tests
+data_for_influx << ["sslyze","infrastructure",$sslyze_issues_count,$sslyze_warnings_count]
+
+masscan=Masscan.new
+masscan.run_tests
+data_for_influx << ["masscan","infrastructure",$masscan_issues_count,$masscan_warnings_count]
+
+if (nmap_cmd_params!='')
+  nmap=Tiger_nmap.new
+  nmap.run_tests
+  data_for_influx << ["nmap","infrastructure",$nmap_issues_count,$nmap_warnings_count]
+end
+
+if (zap_cmd_params!= '')
+  zap=Zap.new
+  zap.run_tests
+  data_for_influx << ["zap","application",$zap_issues_count,$zap_warnings_count]
+end
+
+if (nikto_cmd_params!='')
+  nikto=Nikto.new
+  nikto.run_tests
+  data_for_influx << ["nikto","application",$nikto_issues_count,$nikto_warnings_count]
+end
+
+if (burp_cmd_params!='')
+  burp=Burp.new
+  burp.run_tests
+  data_for_influx << ["burp","application",$burp_issues_count,$burp_warnings_count]
+end
+
+if (qualys_profile_id!='' && qualys_template_id!='')
+  qualys=Qualys.new
+  qualys.search_webapp
+  qualys.start_scan
+  qualys.generate_report
+  qualys.parse_report
+  qualys.delete_assets
+  data_for_influx << ["qualys","application",$qualys_issues_count,$qualys_warnings_count]
+end
+
+if (w3af_config_file!='')
+  p 'W3AF started '
+  w3af=W3af.new
+  w3af.run_tests
+  data_for_influx << ["w3af","application",$w3af_issues_count,$w3af_warnings_count]
+  p 'W3af finished'
+end
+
+if (vpn_id != '')
+  `pkill openvpn`
+  #  Process.kill("HUP", $vpn_pid)
+#  Process.wait
+end
+
+tests_finished=Time.now
+$tests_duration=(tests_finished-tests_started).round(2)
+
+#Sending data to InfluxDB
+data_for_influx.each do |info|
+  Influx.new.sendDataToInfluxDB(info[0],info[1],info[2],info[3],tests_finished.to_i)
+end
+
+html_report=Html_report.new
+html_report.generate(tests_started,tests_finished)
+
+# Creating folder for the reports.
+loop do
+  puts "Creating folder on the LC ... "
+  `ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} "mkdir -p #{$lc_results_path}"`
+  puts "Checking if the folder exists "
+  check_dir = `ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} " if [ -d #{$lc_results_path} ] ; then echo '0'; fi"`
+  break if check_dir.gsub("\n", '') == "0"
+  $logger.info "Creation failed. Retry"
+  sleep 15
+end
+$logger.info "The folder was created : #{$lc_results_path}. Command: ssh -i /home/tiger/.ssh/id_rsa -o StrictHostKeyChecking no tiger@#{$lc_ip} mkdir -p #{$lc_results_path}"
+
+# Copying reports. Check size of source and dist. folders
+loop do
+  puts "Uploading the results to the LC ... "
+  `scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/ tiger@#{$lc_ip}:#{$lc_results_path}`
+  check_file = `ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} "if [ -e #{$node_results_path}/logs/tests_execution_log.txt ] ; then echo '0'; fi"`
+  break if check_file.gsub("\n", '') == "0"
+  $logger.info "Copying failed. Retry uploading files. #{$node_results_path}/logs/tests_execution_log.txt is not exist"
+  sleep 15
+end
+
+if ($issues_count >0)
+  results_hash['result']="vulnerabilities were found: 751"
+#elsif ($warnings_count>0)
+else
+  results_hash['result']="ok"
+end
+
+results_hash['details']="Results URL: #{web_results_path}/tests_summary.html"
+results_hash['tags']={'project_id' => $project_id}
+
+http_request=Html_request.new
+http_request.send($lc_fqdn,$rest_port,'/job/update',results_hash)
+$logger.close()
+
+if (container_deletion_delay!='')
+ sleep(container_deletion_delay.to_i)
+end

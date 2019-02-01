@@ -1,0 +1,4 @@
+source "https://supermarket.chef.io"
+metadata
+cookbook "influxdb", '= 6.0.0'
+cookbook "chef-grafana", '= 0.3.0'

@@ -1,0 +1,6 @@
+{ "run_list": [
+    "recipe[tiger_rest]"
+   ],
+  "secret": "",
+  "user_secret":""
+} 

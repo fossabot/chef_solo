@@ -1,0 +1,159 @@
+
+require 'json'
+require 'time'
+require 'logger'
+require 'pathname'
+require 'yaml'
+require 'date'
+require_relative 'html_helper.rb'
+require_relative 'taurus.rb'
+require_relative 'html_report_helper.rb'
+require_relative 'jmeter.rb'
+require_relative 'jmeter_metrics_helper.rb'
+require_relative 'influx.rb'
+require_relative 'sessions_operations.rb'
+
+$tiger_extensions_path="<%= "#{node['tiger_perf']['scripts_path']}/tiger_extensions" %>"
+$test_type='<%= node["tiger_perf"]["tests_type"] %>'
+$lg_count = "<%= node['tiger_perf']['lg_count'] %>"
+$lg_number = "<%= node['tiger_perf']['lg_number'] %>"
+$current_build_number='<%= node["tiger_perf"]["build_number"] %>'
+$project_id='<%= node['tiger_perf']['project_id'] %>'
+$full_sol_name='<%= node['tiger_perf']['full_sol_name'] %>'
+$full_sol_path='<%= node['tiger_perf']['full_sol_path'] %>'
+$lc_ip='<%= node['lc_ip'] %>'
+$lc_fqdn='<%= node['lc_fqdn'] %>'
+$rest_port=443
+$env_type='<%= node['tiger_perf']['env_type'] %>'
+$test_id='<%= node['tiger_perf']['test_id'] %>'
+$build_started='<%= node['tiger_perf']['build_started'] %>'
+#$lg_fqdn='<%= node['fqdn'] %>'
+$lg_fqdn='<%= node['container_name'] %>'
+$lc_results_path='<%= node['tiger_perf']['lc_results_path'] %>'
+$aggregated_log_path = '<%= node['tiger_perf']['aggregated_results_path'] %>'
+$node_results_path='<%= node['tiger_perf']['node_results_path'] %>'
+$logger=Logger.new("#{$node_results_path}/logs/tests_execution_log.txt")
+    $logger.info "Repo name : <%= node['tiger_perf']['perf_tests_settings_git_path'] %>  Branch: <%= node['tiger_perf']['tiger_env_type'] %>"
+$logs_path="<%= node['tiger_perf']['node_logs_path'] %>"
+$data_path="<%= node['tiger_perf']['node_data_path'] %>"
+$target_host='<%= node['tiger_perf']['target_host'] %>'
+$target_port='<%= node['tiger_perf']['target_port'] %>'
+$issues_count=0
+$warnings_count=0
+env_type_path='<%= node['tiger_perf']['env_type_path'] %>'
+main_yml_path='<%= node['tiger_perf']['main_yml_path']%>'
+$repo_data_files = '<%= node['tiger_perf']['data_files']%>'
+results_hash={}
+results_hash['id']='<%= node['job_id'] %>'
+web_results_path='<%= node['tiger_perf']['web_results_path'] %>'
+
+$common_log_path = '<%= node['tiger_perf']['common_log_path'] %>'
+container_deletion_delay= "<%= node['tiger_perf']['test_details']['container_deletion_delay'] %>"
+
+if (container_deletion_delay!='')
+ sleep(container_deletion_delay.to_i)
+end
+
+test_started=Time.now
+
+main_yml_conf = YAML.load_file(main_yml_path)
+tool_name = main_yml_conf[$test_type]['tool']
+$elk_enabled = main_yml_conf[$test_type]['elk_enabled']
+
+if ($elk_enabled == true)
+  `service filebeat restart`
+  $logger.info "Filebeat enabled"
+end
+
+case tool_name
+  when 'jmeter'
+
+    jmeter_yml_path=Pathname.new(main_yml_path).parent+"jmeter/#{$test_type}.yml"
+    check_session_file_parameter(main_yml_path)
+    jmeter_test=Jmeter_test.new(jmeter_yml_path)
+    jmeter_test.run_test
+    Influx.new.getBuildDurationTime(DateTime.parse($build_started).new_offset(0).strftime("%Y-%m-%d %H:%M:%S"))
+    Influx.new.getPerLgInitNumThreads # get Maximum amount of initialized threads perLG
+    jmeter_metrics_analyzer=JmeterMetricsHelper.new()
+
+    puts "Creating folders for temporary logs.."
+    `ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} "mkdir -p #{$lc_results_path}"`
+    puts "Uploading temporary logs to the LC.."
+    `scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/ tiger@#{$lc_ip}:#{$lc_results_path}`
+    puts "Temporary logs were copied: #{$lc_results_path}"
+
+    #    generate_report(report_csv_path,kpi_csv_path,red_samplers_allowed_perc)
+    if (File.exists?("#{env_type_path}/kpi/#{$test_type}_single_lg.csv"))
+      jmeter_metrics_analyzer_results_hash=jmeter_metrics_analyzer.generate_report("#{$data_path}/#{$test_type}.csv","#{env_type_path}/kpi/#{$test_type}_single_lg.csv",$red_samplers_allowed_perc)
+    else
+      jmeter_metrics_analyzer_results_hash=jmeter_metrics_analyzer.generate_report("#{$data_path}/#{$test_type}.csv","#{env_type_path}/kpi/#{$test_type}.csv",$red_samplers_allowed_perc)
+    end
+  when 'taurus'
+    taurus_yml_path=Pathname.new(main_yml_path).parent+"taurus/#{$test_type}.yml"
+    taurus_test=Taurus_test.new(taurus_yml_path)
+    taurus_test.run_test
+end
+
+
+
+test_finished=Time.now
+$tests_duration=(test_finished-test_started).round(2)
+html_report=Html_report.new
+html_report.generate(tool_name,jmeter_metrics_analyzer_results_hash,test_started,test_finished)
+
+#taurus=Taurus.new
+#taurus.run_tests
+
+puts "Creating folder on the LC: ssh -i /home/tiger/.ssh/id_rsa -o \"StrictHostKeyChecking no\" tiger@#{$lc_ip} \"mkdir -p #{$lc_results_path}\""
+`ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} "mkdir -p #{$lc_results_path}"`
+puts "Uploading results to the LC: scp -r -i /home/tiger/.ssh/id_rsa -o \"StrictHostKeyChecking no\" #{$node_results_path}/ tiger@#{$lc_ip}:#{$lc_results_path}"
+$logger.info "Copying Chef automation log file from /opt/tiger/epm-tigr/chef_solo/chef-solo.log"
+`scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" /opt/tiger/epm-tigr/chef_solo/chef-solo.log tiger@#{$lc_ip}:#{$lc_results_path}`
+`scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/ tiger@#{$lc_ip}:#{$lc_results_path}`
+
+# Checking LG. Was LG last in a line. Time format for getBuildDurationTime should be "%Y-%m-%d %H:%M:%S"
+if (Influx.new.checkLastLG)
+  $last = 1  # Var is used for HTML aggregate reporting
+  Influx.new.getBuildDurationTime(DateTime.parse($build_started).new_offset(0).strftime("%Y-%m-%d %H:%M:%S"))
+  Influx.new.getAggregatedData
+  Influx.new.aggregatedDataToCSV
+  Influx.new.sendAggregatedDataToDB($tests_duration.to_i)
+  Influx.new.getAggregatedInitNumThreads  # get aggregated maximum amount of initialized threads perLG
+  aggregatedData=JmeterMetricsHelper.new()
+  jmeter_metrics_analyzer_results_hash_aggregate=aggregatedData.generate_report("#{$data_path}/aggregatedData.csv","#{env_type_path}/kpi/#{$test_type}.csv",$red_samplers_allowed_perc)
+
+  test_finished=Time.now
+  html_report=Html_report.new
+  html_report.generate(tool_name,jmeter_metrics_analyzer_results_hash_aggregate,test_started,test_finished)
+
+  puts "Creating folders for aggregated data"
+  `ssh -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" tiger@#{$lc_ip} "mkdir -p #{$aggregated_log_path}/data ; mkdir -p #{$aggregated_log_path}/logs"`
+  puts "Uploading AGREGGATED results to the LC"
+  `scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/tests_summary.html tiger@#{$lc_ip}:#{$aggregated_log_path}`
+  `scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/logs/tests_execution_log.txt tiger@#{$lc_ip}:#{$aggregated_log_path}/logs`
+  `scp -r -i /home/tiger/.ssh/id_rsa -o "StrictHostKeyChecking no" #{$node_results_path}/data/aggregatedData.csv tiger@#{$lc_ip}:#{$aggregated_log_path}/data`
+end
+
+
+if (jmeter_metrics_analyzer_results_hash['test_result'] == 'FAILED')
+  results_hash['result']="Red transactions percentage exceeding limit #{$red_samplers_allowed_perc}: 851"
+elsif jmeter_metrics_analyzer_results_hash_aggregate && (jmeter_metrics_analyzer_results_hash_aggregate['test_result'] == 'FAILED')
+  results_hash['result']="Red transactions percentage exceeding limit #{$red_samplers_allowed_perc}: 851"
+else
+  results_hash['result']="ok"
+end
+
+results_hash['details']="Results URL: #{web_results_path}/tests_summary.html"
+results_hash['tags']={'project_id' => $project_id}
+
+begin
+  retries ||= 0
+  http_request=Html_request.new
+  http_request.send($lc_fqdn,$rest_port,'/job/update',results_hash)
+rescue
+  $logger.info " | - Updating status FAILED. Retries #{retries}"
+  sleep 3
+  retry if (retries +=1 ) < 3
+end
+
+$logger.close()

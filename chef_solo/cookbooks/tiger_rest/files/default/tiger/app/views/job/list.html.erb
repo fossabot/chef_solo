@@ -1,0 +1,33 @@
+<h1>Listing Docker hosts jobs</h1>
+ 
+<table border=1>
+  <tr>
+    <th style="padding: 5px;">Job sequential number</th>
+    <th style="padding: 5px;">Job ID</th>
+    <th style="padding: 5px;">Docker host ID</th>
+    <th style="padding: 5px;">Job created</th>
+    <th style="padding: 5px;">Job updated</th>
+    <th style="padding: 5px;">Job status</th>
+    <th style="padding: 5px;">Job details</th>
+    <th style="padding: 5px;">Job Tags</th>
+  </tr>
+ 
+  <% @jobs.each do |job| %>
+    <tr>
+      <td align="center"><%= job.id %></td>
+      <td style="padding: 5px;"><%= job.testID %></td>
+      <td style="padding: 5px;"><%= job.DockerHostID %></td>
+      <td style="padding: 5px;"><%= job.created_at %></td>
+      <td style="padding: 5px;"><%= job.updated_at %></td>
+      <td align="center" style="padding: 5px;"><%= job.result %></td>
+      <td style="padding: 5px;"><%= job.details %></td>
+      <td style="padding: 5px;">
+	<% job.tags.split("\n").each do |tag| %>
+	  <%= tag %> <br>
+	<% end %>
+      </td>
+    </tr>
+  <% end %>
+</table>
+
+

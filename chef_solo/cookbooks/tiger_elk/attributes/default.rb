@@ -1,0 +1,1 @@
+default['tiger_elk']['java_version'] = '8'

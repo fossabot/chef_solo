@@ -1,0 +1,20 @@
+[Unit]
+Description=tiger_rest
+After=syslog.target
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=<%= node['tiger_rest']['apps_path'] %>/tiger
+
+User=root
+Group=root
+
+ExecStart=/bin/bash -c 'bundle exec <%= node['tiger_rest']['apps_path'] %>/tiger/bin/rails server -b 0.0.0.0 -p 3100 >> /var/log/tiger_rest.log 2>&1'
+# ExecStop=bin/bash -c 'cat /var/run/tiger_rest.pid | xargs kill'
+TimeoutSec=100
+
+[Install]
+WantedBy=multi-user.target
+
+

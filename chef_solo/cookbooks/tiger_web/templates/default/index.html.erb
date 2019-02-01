@@ -1,0 +1,80 @@
+<head>
+
+    <title>TIGER web interface</title>
+                <style type="text/css">
+                                body {
+                                        font: 85% verdana,arial,helvetica;
+                                        font-size: 125%;
+                                        color:#000000;
+                                }
+                                body_bold {
+                                        font:bold 85% verdana,arial,helvetica;
+                                        color:#000000;
+                                }
+                        h3 {margin-bottom: 0.5em; font: bold 115% verdana,arial,helvetica; color: #0088cc;}
+                        h4 {margin-bottom: 0.5em; font: bold 100% verdana,arial,helvetica;}
+                        h4_inline {margin-bottom: 0.5em; font: bold 100% verdana,arial,helvetica; display: inline;}
+                        h4_body_inline {margin-bottom: 0.5em; font: 100% verdana,arial,helvetica; display: inline;}
+                        h5 {margin-bottom: 0em; font: 100% bold 75% verdana,arial,helvetica}
+                        h5_inline {margin-bottom: 0.5em; font: bold 75% verdana,arial,helvetica;display: inline;}
+                        h5_body_inline {margin-bottom: 0.5em; font: 75% verdana,arial,helvetica;display: inline;}
+                        a {font: arial;
+                          }
+                        a:visited {
+                            color: #008080;
+                            }
+                        a:link {
+                            color: #008080;
+                            }
+                        a:hover {
+                            color: #00334d;
+                            }
+
+                                table tr td, table tr th {
+                                        font-size: 125%;
+                                        padding: 10px;
+                                }
+                                table.details tr th{
+                                        color: #ffffff;
+                                        font-weight: bold;
+                                        text-align:center;
+                                        background:#2674a6;
+                                        white-space: nowrap;
+                                }
+                                table.details tr td{
+                                        background:#eeeee0;
+                                        white-space: nowrap;
+                                }
+                                table.details tr.red td{
+                                        background: #FF3333;
+                                }
+                                table.details tr.yellow td{
+                                        background:yellow;
+                                }
+                        .trOverridenClass { font-weight: bold; font-style: italic;vertical-align:middle;}
+                </style>
+
+  </head>
+<body>
+<br>
+<h3 align="center" color="#0088cc">TIGER continuous testing service</h3>
+
+<table align="center">
+  <tr>
+    <td></td>
+    <td><a href="https://<%= node['ipaddress'] %>/results/performance"><h5>Performance tests results</h5></a></td>
+    <td><a href="https://<%= node['ipaddress'] %>/results/security"><h5>Security tests results</h5></a></td>
+    <td><a href="https://<%= node['ipaddress'] %>/grafana"><h5>Grafana Web Interface</h5></a></td>
+  </tr>
+</table>
+
+<table align="center">
+  <tr>
+    <td>
+
+    </td>
+  </tr>
+</table>
+<br>
+<hr>
+

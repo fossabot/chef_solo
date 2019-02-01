@@ -1,0 +1,93 @@
+bind-address = ":8088"
+reporting-disabled = false
+
+[admin]
+bind-address = ":8083"
+enabled = true
+https-certificate = "<%= node['influxdb']['ssl_cert_file_path'] %>"
+https-enabled = false
+
+[continuous_queries]
+enabled = true
+log-enabled = true
+run-interval = "1s"
+
+[coordinator]
+log-queries-after = "0"
+max-concurrent-queries = 0
+max-select-buckets = 0
+max-select-point = 0
+max-select-series = 0
+query-timeout = "0"
+write-timeout = "10s"
+
+[data]
+cache-max-memory-size = 524288000
+cache-snapshot-memory-size = 26214400
+cache-snapshot-write-cold-duration = "1h0m0s"
+compact-full-write-cold-duration = "24h0m0s"
+dir = "<%= node['influxdb']['data_file_path'] %>"
+engine = "tsm1"
+max-points-per-block = 0
+query-log-enabled = true
+trace-logging-enabled = false
+wal-dir = "<%= node['influxdb']['wal_file_path'] %>"
+wal-logging-enabled = true
+
+[[graphite]]
+batch-pending = 10
+batch-size = 5000
+batch-timeout = "1s"
+bind-address = ":2003"
+consistency-level = "one"
+database = "collectd"
+enabled = true
+protocol = "tcp"
+retention-policy = ""
+separator = "."
+udp-read-buffer = 0
+templates = ["host.measurement.field*"]
+
+[http]
+auth-enabled = true
+bind-address = ":8086"
+enabled = true
+https-certificate = "<%= node['influxdb']['ssl_cert_file_path'] %>"
+https-enabled = false
+https-private-key = ""
+log-enabled = true
+max-connection-limit = 0
+max-row-limt = 10000
+pprof-enabled = false
+realm = "InfluDB"
+shared-secret = ""
+write-tracing = false
+
+[meta]
+dir = "<%= node['influxdb']['meta_file_path'] %>"
+logging-enabled = true
+retention-autocreate = true
+
+[monitor]
+store-database = "_internal"
+store-enabled = true
+store-interval = "10s"
+
+[[opentsdb]]
+enabled = false
+
+[retention]
+check-interval = "30m0s"
+enabled = true
+
+[shard-precreation]
+advance-period = "30m0s"
+check-interval = "10m0s"
+enabled = true
+
+[subscriber]
+enabled = true
+http-timeout = "30s"
+
+[[udp]]
+enabled = false

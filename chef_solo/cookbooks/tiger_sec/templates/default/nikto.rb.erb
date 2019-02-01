@@ -1,0 +1,156 @@
+class Nikto
+  require 'time'
+  require 'nokogiri'
+  require 'yaml'
+
+  def initialize    
+    $nikto_issues_count = 0
+    $nikto_warnings_count = 0
+    @tests_cmd     = ''
+    $nikto_summary = ''
+    @target_host   = '<%= node['tiger_sec']['target_host'] %>'
+    @target_port   = '<%= node['tiger_sec']['target_port'] %>'
+    @log_path      = '<%= node['tiger_sec']['node_logs_path'] %>/nikto.html'
+    @exclusions_file_path = "<%= node['tiger_sec']['nikto_exclusions_file_path'] %>"
+    @detailed_logs_path   = "<%= node['tiger_sec']['node_logs_path'] %>/nikto_detailed_logs"
+    @web_results_path     = '<%= node['tiger_sec']['web_results_path'] %>'
+    @nikto_cmd_params     = '<%= node['tiger_sec']['nikto_cmd_params'] %>'
+    @software_path        = '<%= node['tiger_common']['software_path'] %>'
+  end
+
+  def run_tests
+    $logger.info "Starting Nikto..."
+    Dir.chdir('<%= node['tiger_sec']['node_logs_path'] %>')
+    Dir.mkdir (@detailed_logs_path) unless (File.exists?(@detailed_logs_path))
+    @tests_cmd="perl #{@software_path}/nikto/program/#{@nikto_cmd_params} -h #{@target_host} -p #{@target_port} -Format htm -output #{@log_path} -Save #{@detailed_logs_path}" # > #{@log_path} 2>&1"    
+    puts "running #{@tests_cmd}"
+    system(@tests_cmd)
+    output_vulnerability 
+    $logger.info "Nikto finished"   
+  end
+
+  # Parse Nikto HTML log ang get an issues hash:{"Decription" => "URI"}
+  def parse_HTML(path)
+    page = Nokogiri::HTML(open(path))
+
+    description = Array.new
+    uri         = Array.new
+    row         = page.css('table[class=dataTable] tr')
+
+    get_content = row.map do |row|
+      row_val=row.css('td').map(&:text)
+    end
+
+    get_content.each do |element|
+      if (element.include? 'Description')
+        description+=element
+      end
+    end
+
+    get_content.each do |element|
+      if (element.include? 'URI')
+        uri+=element
+      end
+    end
+
+    description.select!{ |x| x !~ /Description/ }
+    uri.select!{ |x| x !~ /URI/ }
+    
+    result_hash = Hash[description.zip uri]
+    return result_hash
+  end
+  
+  # Parse YML with exlcusion and get an exclusion hash 
+  def parse_excl_YAML(path)
+    yaml_hash = YAML.load_file(path)
+    return yaml_hash
+  end
+
+  # Output vulnerabilities from parse_HTML with checking exclusions
+  def output_vulnerability
+    vulnerability = parse_HTML(@log_path)
+    # Check exclusion file 
+    if ( File.exist?(@exclusions_file_path) )
+      $logger.info "Exclusion file was found"
+      exlcusion = parse_excl_YAML(@exclusions_file_path)
+      # Warning creation
+      vulnerability.each do |key, value|
+        if ( exlcusion['warning'].has_key?(key.rstrip) )
+          if (exlcusion['warning'][key.rstrip] != value)
+            key_str = key.dup
+            remove_trailing_symbol(key_str)
+            $nikto_summary += <<-SUMMARY
+              <tr class="warning">
+                <td>Nikto</td>
+                <td>#{key_str}</td>
+                <td>
+                  <a href="#{@web_results_path}/logs/nikto.html">Nikto report</a>
+                  <a href="#{@web_results_path}/logs/nikto_detailed_logs">Nikto logs</a>
+                </td>
+              </tr> 
+            SUMMARY
+            $nikto_warnings_count += 1
+            $warnings_count += 1
+          end
+        # Alert creation
+        elsif ( exlcusion['alert'].has_key?(key.rstrip) )
+          if (exlcusion['alert'][key.rstrip] != value)
+            key_str = key.dup
+            remove_trailing_symbol(key_str)
+            $nikto_summary += <<-SUMMARY
+              <tr class="failed">
+                <td>Nikto</td>
+                <td>#{key_str}</td>
+                <td>
+                  <a href="#{@web_results_path}/logs/nikto.html">Nikto report</a>
+                  <a href="#{@web_results_path}/logs/nikto_detailed_logs">Nikto logs</a>
+                </td>
+              </tr> 
+            SUMMARY
+            $nikto_issues_count += 1
+          end                    
+        else
+          key_str = key.dup 
+          remove_trailing_symbol(key_str)
+          $nikto_summary += <<-SUMMARY
+            <tr class="failed">
+              <td>Nikto</td>
+              <td>#{key_str}</td>
+              <td>
+                <a href="#{@web_results_path}/logs/nikto.html">Nikto report</a>
+                <a href="#{@web_results_path}/logs/nikto_detailed_logs">Nikto logs</a>
+              </td>
+            </tr> 
+          SUMMARY
+          $nikto_issues_count += 1 
+        end
+      end
+    else
+      $logger.info "Exclusion file wasn't found"
+      vulnerability.each do |key, value|
+        key_str = key.dup
+        remove_trailing_symbol(key_str)
+        $nikto_summary += <<-SUMMARY
+          <tr class="failed">
+            <td>Nikto</td>
+            <td>#{key_str}</td>
+            <td>
+              <a href="#{@web_results_path}/logs/nikto.html">Nikto report</a>
+              <a href="#{@web_results_path}/logs/nikto_detailed_logs">Nikto logs</a>
+            </td>
+          </tr> 
+        SUMMARY
+        $nikto_issues_count += 1
+      end
+    end
+
+    $issues_count += $nikto_issues_count
+  end
+  
+  # Delete "." and ":"  and " "at the end of the string
+  def remove_trailing_symbol(str)
+    str.rstrip!
+    str.chomp!(".")
+    str.chomp!(":")
+  end
+end

@@ -1,0 +1,28 @@
+class TigerExtension
+  # encoding: utf-8
+  require 'pathname'
+  require 'fileutils'
+
+  def initialize (jmeter_jmx_path,tiger_extensions_path)
+    @jmeter_jmx_path=jmeter_jmx_path
+    @tiger_extensions_path=tiger_extensions_path    
+  end
+
+  def extend_jmeter_jmx
+    tiger_extension=File.read("#{@tiger_extensions_path}/jmeter/tiger_extension.jmx")
+    puts "tiger_extension_path: #{@tiger_extensions_path}/jmeter/tiger_extension.jmx"
+    puts "@jmeter_jmx_path: #{@jmeter_jmx_path}"
+    xml_cont=File.read(@jmeter_jmx_path).encode('UTF-8', :invalid => :replace)
+    xml_ar=xml_cont.split(/<\/TestPlan>\W+<hashTree>/)
+    xml_modified=xml_ar[0]+"    </TestPlan>\n    <hashTree>\n"+tiger_extension+xml_ar[1]
+    jmx_path= Pathname.new(@jmeter_jmx_path)
+    jmx_file_name=jmx_path.basename.to_s
+    merged_file_name=jmx_file_name.gsub(".jmx","_merged.jmx")
+    File.write("#{jmx_path.dirname}/#{merged_file_name}",xml_modified)
+    FileUtils.cp "#{jmx_path.dirname}/#{merged_file_name}","#{$node_results_path}/data"
+    FileUtils.cp @jmeter_jmx_path,"#{$node_results_path}/data"
+    FileUtils.cp "#{@tiger_extensions_path}/jmeter/tiger_extension.jmx","#{$node_results_path}/data"
+    return "#{jmx_path.dirname}/#{merged_file_name}"
+  end
+
+end

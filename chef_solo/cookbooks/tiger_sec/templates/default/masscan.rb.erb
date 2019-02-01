@@ -1,0 +1,58 @@
+class Masscan
+  require "resolv"
+
+  def initialize
+      $masscan_issues_count = 0
+      $masscan_warnings_count = 0
+      $masscan_summary = ""
+      @target_host            = "<%= node['tiger_sec']['target_host'] %>".split('/')[0]
+      @target_port            = "<%= node['tiger_sec']['target_port'] %>"
+      @target_permitted_ports = "<%= node['tiger_sec']['permitted_ports'] %>"
+      @log_path               = "<%= node['tiger_sec']['node_logs_path'] %>/masscan_log.txt"
+      @web_results_path       = "<%= node['tiger_sec']['web_results_path'] %>"
+  end
+
+  def run_tests
+    host = Resolv.getaddress(@target_host)
+    $logger.info "Running masscan : masscan #{host} -p 0-65535  -pU:0-65535 --rate 5000 "
+    `masscan #{host} -p 0-65535  -pU:0-65535 --rate 5000 > #{@log_path} 2>&1`
+    parse_log
+    $logger.info "Masscan test has finished"
+  end
+
+  def parse_log
+    if ( File.exist?(@log_path) )
+      file_output=Array.new()
+      @target_permitted_ports += " " + @target_port.to_s + "/tcp" 
+
+      IO.readlines(@log_path).each do |line|
+        file_output << line
+      end
+
+      open_ports=Array.new()
+      file_output.each do |element|
+        search_port = /\d+[\/][a-z]*/.match(element).to_s
+        open_ports << "#{search_port}"
+      end
+        
+      open_ports = open_ports.reject { |el| el.empty? }
+      open_ports.each do |element|
+
+        if ( !@target_permitted_ports.include? "#{element}")        
+          $issues_count+=1
+          $masscan_issues_count+=1
+          $masscan_summary+= <<-ISSUE
+            <tr class="failed"">
+              <td>Masscan</td>
+              <td>Additional opened port #{element} has been found</td>
+              <td><a href=\"#{@web_results_path}/logs/masscan_log.txt\">Masscan logs</a></td>
+            </tr>
+          ISSUE
+        else
+          $logger.info "  | -- Port #{element} is permitted"
+        end
+      end
+    end
+  end
+end
+

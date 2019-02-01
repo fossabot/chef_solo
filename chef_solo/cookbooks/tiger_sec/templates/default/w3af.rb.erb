@@ -1,0 +1,71 @@
+class W3af
+  require 'json'
+  require 'time'
+  require 'nokogiri'
+
+  def initialize    
+    $w3af_issues_count=0
+    $w3af_warnings_count = 0 
+    @tests_cmd=''
+    $w3af_summary=''
+    @target_host='<%= node['tiger_sec']['target_host'] %>'
+    @target_port='<%= node['tiger_sec']['target_port'] %>'
+    @log_path='<%= node['tiger_sec']['node_logs_path'] %>/w3af.html'
+    @detailed_logs_path="<%= node['tiger_sec']['node_logs_path'] %>/w3af_detailed_logs"
+    @web_results_path='<%= node['tiger_sec']['web_results_path'] %>'
+    @w3af_cmd_params='<%= node['tiger_sec']['w3af_cmd_params'] %>'
+    @software_path='<%= node['tiger_common']['software_path'] %>'
+    @scripts_path='<%= node['tiger_sec']['scripts_path'] %>'
+    @config_file_path='<%= node['tiger_sec']['w3af_config_path'] %>'
+    @main_config_file_name="w3af_cmd_file.w3af"
+  end
+
+  def run_tests
+  # -Display V -F htm -output
+    Dir.mkdir (@detailed_logs_path) unless (File.exists?(@detailed_logs_path))
+    w3af_config_addition=File.read("#{@scripts_path}/w3af_cmd_file_addition.tmp")
+    w3af_config=File.read(@config_file_path)
+    File.write("#{@software_path}/w3af/#{@main_config_file_name}",w3af_config+"\n"+w3af_config_addition)
+    @tests_cmd="#{@software_path}/w3af/w3af_console -y -s #{@software_path}/w3af/#{@main_config_file_name}" # > #{@log_path} 2>&1"    
+    $logger.info "Running #{@tests_cmd}"
+    system(@tests_cmd)
+    output_vulnerability
+  end
+
+  def parse_HTML(path)
+    html = Nokogiri::HTML( File.open(path))
+
+    vulnerabilities = Hash.new
+
+    html.css('.thumbnail').each do |content|
+      if ( content.css('.col-md-8 .text-center').text != '')
+        ids = Array.new
+        content.at_css('.col-md-10 p').text.gsub("\n",'').scan(/id[s]*\s+\d+.*/).each do |element|
+          element.split.each do |el|
+            next if el !~ /.*\d.*/
+            ids.push(el.gsub(/[.,]/,''))
+          end
+        end
+        vulnerabilities[content.css('.col-md-8 .text-center').text] = ids
+      end
+    end
+    return vulnerabilities
+  end
+
+  def output_vulnerability
+    vulnerability = parse_HTML(@log_path)
+    vulnerability.each do |key, value|
+      $w3af_summary += <<-SUMMARY
+          <tr class="failed">
+            <td>W3af</td>
+            <td>'#{key}' issue was found </td>
+            <td>
+              <a href="#{@web_results_path}/logs/w3af.html">w3af report</a>
+            </td>
+          </tr> 
+        SUMMARY
+        $w3af_issues_count += 1
+      end
+      $issues_count += $w3af_issues_count
+  end
+end

@@ -1,0 +1,268 @@
+class Qualys
+  require 'nokogiri'
+
+  def initialize
+    @target_host           = '<%= node['tiger_sec']['target_host'] %>'
+    @target_protocol       = '<%= node['tiger_sec']['protocol'] %>'
+    @target_port           = '<%= node['tiger_sec']['target_port'] %>'
+    @project_id            = '<%= node['tiger_sec']['project_id'] %>'
+    @env_type              = '<%= node['tiger_sec']['env_type'] %>'
+    @config_file_path      = '<%= node['tiger_sec']['qualys_xml'] %>'
+    @node_log_path         = "<%= node['tiger_sec']['node_logs_path'] %>"
+    @web_results_path      = '<%= node['tiger_sec']['web_results_path'] %>'
+    @qualys_api            = '<%= node['tiger_sec']['qualys_api'] %>'
+    @qualys_scanner        = '<%= node['tiger_sec']['qualys_scanner'] %>'
+    @qualys_profile_id     = '<%= node['tiger_sec']['qualys_profile_id'] %>'
+    @qualys_template_id    = '<%= node['tiger_sec']['qualys_template_id'] %>'
+    @qualys_login          = '<%= node['tiger_sec']['qualys_login'] %>'
+    @qualys_password       = '<%= node['tiger_sec']['qualys_password'] %>'
+    $qualys_summary        = ''
+    $qualys_issues_count   = 0
+    $qualys_warnings_count = 0
+  end
+
+  def search_webapp
+    #generate webapp_name
+    @webapp_name = "#{@project_id}_#{@env_type}"
+    #generate webapp_url
+    main_url = @target_host.split('/')[0]
+    rel_path = @target_host.sub(main_url,'')
+    if ["80", "443"].include? "#{@target_port}"
+      @webapp_url = "#{@target_protocol}://#{main_url}#{rel_path}"
+    else
+      @webapp_url = "#{@target_protocol}://#{main_url}:#{@target_port}#{rel_path}"
+    end
+    puts @webapp_url
+
+    # Create xml for webapp name search
+    xml_request = Nokogiri::XML(File.read("#{@config_file_path}/webapp_name_request.xml"))
+    default_app_name = xml_request.at_xpath("ServiceRequest/filters/Criteria")
+    default_app_name.content = "#{@webapp_name}"
+    File.write("#{@config_file_path}/#{@webapp_name}_name.xml", xml_request.to_xml)
+    search_webapp = `curl -s -u "#{@qualys_login}:#{@qualys_password}" -H "content-type: text/xml" -X "POST" --data-binary @- "#{@qualys_api}/search/was/webapp" < #{@config_file_path}/#{@webapp_name}_name.xml`
+    xml_answer = Nokogiri::XML.parse(search_webapp)
+    search_webapp_id = xml_answer.at_xpath("ServiceResponse/data/WebApp/id")
+
+    # Find out if the application was already created
+    if search_webapp_id
+      @webapp_id = search_webapp_id.content
+      puts "Web application #{@webapp_name} was already created, using the existing one; id = #{@webapp_id}"
+    else
+      puts "The web application doesn't exist, creating..."
+      create_webapp
+    end
+    #File.delete("#{@config_file_path}/#{@webapp_name}_name.xml")
+  end
+
+  def create_webapp
+    # Create xml for webapp creation
+    webapp_settings = {
+      "ServiceRequest/data/WebApp/name" => "<![CDATA[#{@webapp_name}]]>",
+      "ServiceRequest/data/WebApp/url" => "<![CDATA[#{@webapp_url}]]>",
+      "ServiceRequest/data/WebApp/defaultProfile/id" => "#{@qualys_profile_id}",
+    }
+
+    xml_request = Nokogiri::XML(File.read("#{@config_file_path}/webapp_create_request.xml"))
+    webapp_settings.each do |path, value|
+      default_value = xml_request.at_xpath(path)
+      default_value.content = value
+    end
+    File.write("#{@config_file_path}/#{@webapp_name}_create_request.xml", xml_request.to_xml)
+
+    # Create web application (options = option profile only)
+    create_webapp = `curl -s -u "#{@qualys_login}:#{@qualys_password}" -H "Content-type: text/xml" -X "POST" --data-binary @- "#{@qualys_api}/create/was/webapp/" < #{@config_file_path}/#{@webapp_name}_create_request.xml`
+    xml_answer = Nokogiri::XML.parse(create_webapp)
+    search_webapp_id = xml_answer.at_xpath("ServiceResponse/responseCode")
+    if search_webapp_id.content == "SUCCESS"
+      @webapp_id = xml_answer.at_xpath("ServiceResponse/data/WebApp/id").content
+      puts "Web application named #{@webapp_name} was created; id = #{@webapp_id}"
+    else
+      puts "Web application creating failed! The request output is:"
+      puts xml_answer
+    end
+    #File.delete("#{@config_file_path}/#{@webapp_name}_create_request.xml")
+  end
+
+  def start_scan
+    # Create xml for scanning start
+    @current_time = Time.now.strftime('%Y-%m-%d %H:%M')
+    scanners_list = {
+      "EPM_BY2_Minsk" => "7",
+      "EPM_HU1_Budapest" => "6",
+      "EPM_IN1_Hyderabad" => "3",
+      "EPM_RU2_SaintPetersburg" => "6",
+      "EPM_UA2_Kyiv" => "6",
+      "EPM_US2_Edison" => "2",
+    }
+    scan_settings = {
+      "ServiceRequest/data/WasScan/name" => "#{@webapp_name} WAS (#{@current_time})",
+      "ServiceRequest/data/WasScan/target/webApp/id" => "#{@webapp_id}",
+      "ServiceRequest/data/WasScan/profile/id" => "#{@qualys_profile_id}",
+    }
+    xml_request = Nokogiri::XML(File.read("#{@config_file_path}/scan_settings_request.xml"))
+    if @qualys_scanner != ""
+      scanners_list.each do |scanner, number|
+        if scanner.include? @qualys_scanner
+          @qualys_scanner = scanner + Random.new.rand(1..number.to_i).to_s
+          puts "#{@qualys_scanner} appliance will be used for scanning"
+          break
+        end
+      end
+      xml_request.at_xpath("ServiceRequest/data/WasScan/target/scannerAppliance/type").content = "INTERNAL"
+      xml_request.at_xpath("ServiceRequest/data/WasScan/target/scannerAppliance/type").add_next_sibling("<friendlyName>#{@qualys_scanner}</friendlyName>")
+    end
+    scan_settings.each do |path, value|
+      default_value = xml_request.at_xpath(path)
+      default_value.content = value
+    end
+    File.write("#{@config_file_path}/#{@webapp_name}_scan_settings_request.xml", xml_request.to_xml)
+
+    # Start new scan
+    start_scan = `curl -s -u "#{@qualys_login}:#{@qualys_password}" -H "content-type: text/xml" -X "POST" --data-binary @- "#{@qualys_api}/launch/was/wasscan" < #{@config_file_path}/#{@webapp_name}_scan_settings_request.xml`
+    xml_answer = Nokogiri::XML.parse(start_scan)
+    status = xml_answer.at_xpath("ServiceResponse/responseCode")
+    if status.content == "SUCCESS"
+      @scan_id = xml_answer.at_xpath("ServiceResponse/data/WasScan/id").content
+      puts "WAS scan was started; id = #{@scan_id}"
+    else
+      puts "Scan starting failed! The request output is:"
+      puts xml_answer
+    end
+    #File.delete("#{@config_file_path}/#{@webapp_name}_scan_settings_request.xml")
+    sleep 60
+
+    # Wait until scan is finished
+    while true
+      get_scan_status = `curl -s -n -u "#{@qualys_login}:#{@qualys_password}" "#{@qualys_api}/status/was/wasscan/#{@scan_id}"`
+      xml_answer = Nokogiri::XML.parse(get_scan_status)
+      status = xml_answer.at_xpath("ServiceResponse/data/WasScan/status").content
+      if status != "FINISHED"
+        sleep 60
+      else
+        puts "The scan was finished"
+        #Download scan result for parsing - changed to web app report parsing
+        #get_scan_result = `curl -s -u "#{@qualys_login}:#{@qualys_password}" "#{@qualys_api}/download/was/wasscan/#{@scan_id}" > #{@node_log_path}/#{@scan_id}.xml`
+        sleep 10
+        break
+      end
+    end
+  end
+
+  def generate_report
+    # Create xml for report generation - WAS_WEBAPP_REPORT
+    report_formats = {
+      "HTML_BASE64" => "html",
+      "XML" => "xml",
+    }
+    @reports = Array.new
+    report_formats.each do |codename, extension|
+      # Create xml for report generation - WAS_WEBAPP_REPORT
+      report_settings = {
+        "ServiceRequest/data/Report/name" => "#{@webapp_name} WAS (#{@current_time})", # ADD SCAN NAME VAR
+        "ServiceRequest/data/Report/description" => "<![CDATA[#{@webapp_name} report generated by API]]>",
+        "ServiceRequest/data/Report/format" => "#{codename}",
+        "ServiceRequest/data/Report/config/webAppReport/target/webapps/WebApp/id" => "#{@webapp_id}",
+        "ServiceRequest/data/Report/template/id" => "#{@qualys_template_id}",
+      }
+
+      xml_request = Nokogiri::XML(File.read("#{@config_file_path}/report_settings_request.xml"))
+      report_settings.each do |path, value|
+        default_value = xml_request.at_xpath(path)
+        default_value.content = value
+      end
+      File.write("#{@config_file_path}/#{@webapp_name}_report_settings_request.xml", xml_request.to_xml)
+
+      # Generate scan report
+      generate_report = `curl -s -u "#{@qualys_login}:#{@qualys_password}" -H "content-type: text/xml" -X "POST" --data-binary @- "#{@qualys_api}/create/was/report" < #{@config_file_path}/#{@webapp_name}_report_settings_request.xml`
+      xml_answer = Nokogiri::XML.parse(generate_report)
+      status = xml_answer.at_xpath("ServiceResponse/responseCode")
+      if status.content == "SUCCESS"
+        @report_id = xml_answer.at_xpath("ServiceResponse/data/Report/id").content
+        @reports.push(@report_id)
+        puts "#{extension}-report generation was started; id = #{@report_id}"
+      else
+        puts "Scan report genereting failed! The request output is:"
+        puts xml_answer
+      end
+      #File.delete("#{@config_file_path}/#{@webapp_name}_report_settings_request.xml")
+
+      # Wait until report is completed
+      while true
+        get_report_details = `curl -s -u "#{@qualys_login}:#{@qualys_password}" "#{@qualys_api}/get/was/report/#{@report_id}"`
+        xml_answer = Nokogiri::XML.parse(get_report_details)
+        status = xml_answer.at_xpath("ServiceResponse/data/Report/status").content
+        if status != "COMPLETE"
+          sleep 5
+        else
+          # Download scan report
+          puts "The #{extension}-report was generated"
+          download_report = `curl -s -u "#{@qualys_login}:#{@qualys_password}" "#{@qualys_api}/download/was/report/#{@report_id}" > #{@node_log_path}/qualys_was_report.#{extension}` ##{@report_id}.#{extension}
+          break
+        end
+      end
+    end
+  end
+
+  #Parse Qualys report
+  def parse_report
+    #Gathering info from vulnerabilities list - ID, QID, URL
+    count = 0
+    qualys_issues = Array.new
+    xml_report = Nokogiri::XML(File.read("#{@node_log_path}/qualys_was_report.xml"))
+    xml_report.css("RESULTS VULNERABILITY").each do |result|
+      found_issue = Hash.new
+      found_issue[:ID] = result.css("ID").text
+      found_issue[:QID] = result.css("QID").text
+      found_issue[:URL] = result.css("URL").first.text
+      qualys_issues.push(found_issue)
+    end
+    #Gathering info from vulnerabilities glossary - SEVERITY, TITLE
+    qualys_issues.each do |issue|
+      xml_report.css("GLOSSARY QID").each do |entry|
+        if entry.css("QID").text == issue[:QID]
+          issue[:SEVERITY] = entry.css("SEVERITY").text
+          issue[:TITLE] = entry.css("TITLE").text
+          break
+        end
+      end
+    end
+    #puts qualys_issues
+    qualys_issues.each do |issue|
+      $qualys_summary += <<-SUMMARY
+        <tr class="failed">
+          <td>Qualys</td>
+          <td>#{issue[:TITLE]}. Affected path: <b>#{issue[:URL]}</b></td>
+          <td>
+            <a href="#{@web_results_path}/logs/qualys_was_report.html">Qualys WAS report</a>
+          </td>
+        </tr>
+      SUMMARY
+      $qualys_issues_count += 1
+    end
+    $issues_count += $qualys_issues_count
+    #File.delete("#{@node_log_path}/#{@scan_id}.xml")
+  end
+
+  #Delete reports, scan and web application from Qualys. Assets types: webapp, report, wasscan
+  def remove_asset(asset_type, asset_id)
+    remove_asset = `curl -s -u "#{@qualys_login}:#{@qualys_password}" -H "content-type: text/xml" -X "POST" "#{@qualys_api}/delete/was/#{asset_type}/#{asset_id}"`
+    xml_answer = Nokogiri::XML.parse(remove_asset)
+    status = xml_answer.at_xpath("ServiceResponse/responseCode")
+    if status.content == "SUCCESS"
+      puts "#{asset_type} id=#{asset_id} was deleted"
+    else
+      puts "#{asset_type} id=#{asset_id} deleting failed! The request output is:"
+      puts xml_answer
+    end
+  end
+
+  def delete_assets
+    @reports.each do |report_id|
+      remove_asset("report", report_id)
+    end
+    remove_asset("wasscan", @scan_id)
+    remove_asset("webapp", @webapp_id)
+  end
+
+
+end

@@ -1,0 +1,10 @@
+<h2>Detailed test settings</h2>
+<table class="settings">
+  <tr><td>Docker host</td> <td><%= node['DockerHostID'] %></td></tr>
+  <tr><td>Docker container ID</td> <td><%= node['fqdn'] %></td></tr>
+  <tr><td>Solution name</td> <td> <%= "#{node['tiger_perf']['full_sol_name']}" %></td></tr>
+<% node['tiger_perf']['test_attributes_hash'].each do |param_name,param_descr| %>
+  <% if (node['tiger_perf'][param_name] && node['tiger_perf'][param_name]!="") %>
+      <tr><td><%= param_descr %></td> <td><%= node['tiger_perf'][param_name] %></td></tr>
+  <% end %>
+<% end %>

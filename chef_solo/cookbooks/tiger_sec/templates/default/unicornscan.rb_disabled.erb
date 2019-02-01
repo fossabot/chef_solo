@@ -1,0 +1,59 @@
+class Unicornscan
+    require 'json'
+    require 'time'
+
+    def initialize
+        $unicornscan_issues_count=0
+        $unicornscan_summary=""
+        @target_host            = "<%= node['tiger_sec']['target_host'] %>"
+        @target_port            = "<%= node['tiger_sec']['target_port'] %>"
+        @target_permitted_ports = "<%= node['tiger_sec']['permitted_ports'] %>"
+        @log_path               = "<%= node['tiger_sec']['node_logs_path'] %>/log_unicornscan.txt"
+        @web_results_path       = "<%= node['tiger_sec']['web_results_path'] %>"
+        @unicornscan_cmd_params = "<%= node['tiger_sec']['unicornscan_cmd_params'] %>"
+        @web_results_path       = "<%= node['tiger_sec']['web_results_path'] %>"
+    end
+
+    def run_tests
+      $logger.info "Running #{@test_cmd}"
+      File.open(@log_path,"a+") { |f| f.puts("Test started at #{Time.now}") }
+      `unicornscan -msf -v #{@target_host}:1-65535 >> #{@log_path} 2>&1`
+      `unicornscan -mU -v #{@target_host}:1-65535 >> #{@log_path} 2>&1`
+      File.open(@log_path,"a+") { |f| f.puts("Test ended at #{Time.now}") }
+      parse_log
+    end
+
+    def parse_log
+      if ( File.exist?(@log_path) )
+        file_output=Array.new()
+
+        IO.readlines(@log_path).each do |line|
+          file_output << line
+        end
+
+        open_ports=Array.new()
+        file_output.each do |element|
+          if ( element =~ /\d+\]/ )
+            search_port = /\d+\]/.match(element).to_s
+            open_ports << "#{search_port.chomp(']')}/#{element.split[0].downcase}"
+          end
+        end
+        
+        open_ports.each do |element|
+
+          if ( !@target_permitted_ports.include? "#{element}")        
+              $issues_count+=1
+              $unicornscan_issues_count+=1
+              $unicornscan_summary+= <<-Warrning
+                  <tr class="failed"">
+                    <td>Unicornscan</td>
+                    <td>Additional opened port #{element} has been found</td>
+                    <td><a href=\"#{@web_results_path}/logs/log_unicornscan.txt\">Unicornscan log file</a></td>
+                  </tr>
+              Warrning
+          end
+        end
+      end
+    end
+end
+

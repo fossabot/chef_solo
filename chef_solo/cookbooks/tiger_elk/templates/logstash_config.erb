@@ -1,0 +1,67 @@
+# ======== Logstash input ========
+input {
+  beats {
+    host => "0.0.0.0"
+    port => 5044
+    type => "errorSample"
+    client_inactivity_timeout => 36000
+  }	
+}
+
+# ======== Logstash filters ========
+filter {
+
+throttle {
+#   before_count => -1
+    after_count => 100
+    period => 10
+    max_age => 30
+    key => "%{errorSample}"
+    add_tag => "throttled"
+    }
+if  [message] !~ /^.*<httpSample.+\n\s*<(responseHeader|assertionResult).*$/ or "throttled" in [tags] {
+  drop { }
+}
+   xml {
+        source => "message"
+        xpath => ["//responseHeader/text()", "Response_Header" ]
+        xpath => ["//requestHeader/text()", "Request_Header" ]
+        xpath => ["//responseData/text()", "Response_Data" ]
+        xpath => ["//cookies/text()", "COOKIES_data" ]
+        xpath => ["//method/text()", "HTTP_method" ]
+        xpath => ["//java.net.URL/text()", "URL" ]
+        xpath => ["//httpSample/@lb", "Request_Name" ]
+        xpath => ["//httpSample/@rc", "Response_Code" ]
+        xpath => ["//httpSample/@tn", "ThreadGroup_Name" ]
+        xpath => ["//httpSample/@by", "Recieved_bytes" ]
+        xpath => ["//httpSample/@t", "Elapsed_Time" ]
+        xpath => ["//failureMessage/text()", "Assertion" ]
+
+        store_xml => "false"
+       }
+
+  grok {
+        match => {"Response_Header" => "(?<JMeter_timestamp>\d{1,2}\s+\w{3}\s+\d{4}\s+\d{2}:\d{2}:\d{2})"}
+       }
+
+  date {
+        match => [ "JMeter_timestamp" , "dd MMM yyyy HH:mm:ss" ]
+        target => "@timestamp"
+        timezone => "Etc/UTC"
+       }
+
+  mutate {
+         remove_field => [ "message","offset","_score","type","input_type","[beat][version]","source","@version","_id","_type","[beat][hostname]","[beat][name]","JMeter_timestamp" ]
+         remove_tag => [ "beats_input_codec_plain_applied","_grokparsefailure" ]
+         }
+}
+
+# ======== Logstash output ========
+output {
+  if "EPM-TIGR" in [tags] {
+    elasticsearch {
+      hosts => "127.0.0.1"
+      index => "jmeter-%{+YYYY.MM}"
+    }
+  }
+}

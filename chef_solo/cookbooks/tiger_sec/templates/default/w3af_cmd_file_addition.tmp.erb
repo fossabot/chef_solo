@@ -1,0 +1,16 @@
+output html_file
+
+output config html_file
+set output_file <%= node['tiger_sec']['node_logs_path'] %>/w3af.html
+set http_output_file <%= node['tiger_sec']['node_logs_path'] %>/w3af_detailed_logs/w3af_detailed_log.txt
+
+back
+back
+
+target
+set target <%= "#{node['tiger_sec']['protocol']}://#{node['tiger_sec']['target_host']}:#{node['tiger_sec']['target_port']}" %>/
+
+back
+start
+exit
+

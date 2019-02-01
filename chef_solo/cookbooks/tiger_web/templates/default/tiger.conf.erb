@@ -1,0 +1,4 @@
+<VirtualHost *:80>
+    ServerName <%= node['tiger_web']['URL'] %>
+    Redirect "/" "https://<%= node['tiger_web']['URL'] %>/"
+</VirtualHost>
