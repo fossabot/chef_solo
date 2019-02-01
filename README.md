@@ -8,6 +8,6 @@ For installation of all necessary software, you should follow these steps:
   - Run (system)_open_ports.sh
 
 
-
 ## License
 [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FTIGER-Framework%2Fchef_solo.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2FTIGER-Framework%2Fchef_solo?ref=badge_large)
+
